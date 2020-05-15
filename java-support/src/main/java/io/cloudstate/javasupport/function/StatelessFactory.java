@@ -1,5 +1,6 @@
-package io.cloudstate.javasupport;
+package io.cloudstate.javasupport.function;
 
+import io.cloudstate.javasupport.Context;
 import io.cloudstate.javasupport.eventsourced.CommandHandler;
 import io.cloudstate.javasupport.eventsourced.EventHandler;
 

@@ -4,22 +4,30 @@ import java.lang.reflect.{Constructor, InvocationTargetException, Method}
 import java.util.Optional
 
 import com.google.protobuf.{Descriptors, Any => JavaPbAny}
-import io.cloudstate.javasupport.{
-  Context,
-  ServiceCallFactory,
+import io.cloudstate.javasupport.eventsourced.{
+  EventHandler,
+  EventSourcedContext,
+  Snapshot,
+  SnapshotContext,
+  SnapshotHandler
+}
+import io.cloudstate.javasupport.{Context, ServiceCallFactory}
+import io.cloudstate.javasupport.impl.ReflectionHelper.{InvocationContext, MainArgumentParameterHandler}
+import io.cloudstate.javasupport.function.{
+  CommandContext,
+  CommandHandler,
+  Stateless,
   StatelessCreationContext,
   StatelessFactory,
   StatelessHandler
 }
-import io.cloudstate.javasupport.crud.{CrudContext, CrudEntityCreationContext, CrudEntityHandler, CrudEventContext, _}
-import io.cloudstate.javasupport.impl.ReflectionHelper.{InvocationContext, MainArgumentParameterHandler}
 
 import scala.collection.concurrent.TrieMap
 
 /**
- * Annotation based implementation of the [[CrudEntityFactory]].
+ * Annotation based implementation of the [[StatelessFactory]].
  */
-private[impl] class AnnotationBasedCrudSupport(
+private[impl] class AnnotationBasedStatelessSupport(
     entityClass: Class[_],
     anySupport: AnySupport,
     override val resolvedMethods: Map[String, ResolvedServiceMethod[_, _]],
@@ -183,7 +191,7 @@ private object EventBehaviorReflection {
 
     ReflectionHelper.validateNoBadMethods(
       allMethods,
-      classOf[CrudEntity],
+      classOf[Stateless],
       Set(classOf[EventHandler], classOf[CommandHandler], classOf[SnapshotHandler], classOf[Snapshot])
     )
 
@@ -209,7 +217,7 @@ private class EventHandlerInvoker(val method: Method) {
 
   private val annotation = method.getAnnotation(classOf[EventHandler])
 
-  private val parameters = ReflectionHelper.getParameterHandlers[CrudEventContext](method)()
+  private val parameters = ReflectionHelper.getParameterHandlers[EventSourcedContext](method)()
 
   private def annotationEventClass = annotation.eventClass() match {
     case obj if obj == classOf[Object] => None
@@ -238,7 +246,7 @@ private class EventHandlerInvoker(val method: Method) {
       )
   }
 
-  def invoke(obj: AnyRef, event: AnyRef, context: CrudEventContext): Unit = {
+  def invoke(obj: AnyRef, event: AnyRef, context: EventSourcedContext): Unit = {
     val ctx = InvocationContext(event, context)
     method.invoke(obj, parameters.map(_.apply(ctx)): _*)
   }
