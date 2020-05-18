@@ -1,10 +1,10 @@
 package io.cloudstate.javasupport;
 
-import com.typesafe.config.Config;
+import akka.Done;
 import com.google.protobuf.Descriptors;
+import com.typesafe.config.Config;
 import io.cloudstate.javasupport.crdt.CrdtEntity;
 import io.cloudstate.javasupport.crdt.CrdtEntityFactory;
-import io.cloudstate.javasupport.crud.CrudEntity;
 import io.cloudstate.javasupport.eventsourced.EventSourcedEntity;
 import io.cloudstate.javasupport.eventsourced.EventSourcedEntityFactory;
 import io.cloudstate.javasupport.impl.AnySupport;
@@ -13,13 +13,9 @@ import io.cloudstate.javasupport.impl.crdt.CrdtStatefulService;
 import io.cloudstate.javasupport.impl.eventsourced.AnnotationBasedEventSourcedSupport;
 import io.cloudstate.javasupport.impl.eventsourced.EventSourcedStatefulService;
 
-import akka.Done;
-
-import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.CompletionStage;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletionStage;
 
 /**
  * The CloudState class is the main interface to configuring entities to deploy, and subsequently
@@ -152,52 +148,6 @@ public final class CloudState {
             factory,
             descriptor,
             newAnySupport(additionalDescriptors),
-            persistenceId,
-            snapshotEvery));
-
-    return this;
-  }
-
-  /**
-   * Register an annotated crud entity.
-   *
-   * <p>The entity class must be annotated with {@link io.cloudstate.javasupport.crud.CrudEntity}.
-   *
-   * @param entityClass The entity class.
-   * @param descriptor The descriptor for the service that this entity implements.
-   * @param additionalDescriptors Any additional descriptors that should be used to look up protobuf
-   *     types when needed.
-   * @return This stateful service builder.
-   */
-  public CloudState registerCrudEntity(
-      Class<?> entityClass,
-      Descriptors.ServiceDescriptor descriptor,
-      Descriptors.FileDescriptor... additionalDescriptors) {
-
-    CrudEntity entity = entityClass.getAnnotation(CrudEntity.class);
-    if (entity == null) {
-      throw new IllegalArgumentException(
-          entityClass + " does not declare an " + CrudEntity.class + " annotation!");
-    }
-
-    final String persistenceId;
-    final int snapshotEvery;
-    if (entity.persistenceId().isEmpty()) {
-      persistenceId = entityClass.getSimpleName();
-      snapshotEvery = 0; // Default
-    } else {
-      persistenceId = entity.persistenceId();
-      snapshotEvery = entity.snapshotEvery();
-    }
-
-    final AnySupport anySupport = newAnySupport(additionalDescriptors);
-
-    services.put(
-        descriptor.getFullName(),
-        new EventSourcedStatefulService(
-            new AnnotationBasedEventSourcedSupport(entityClass, anySupport, descriptor),
-            descriptor,
-            anySupport,
             persistenceId,
             snapshotEvery));
 
