@@ -108,7 +108,9 @@ private[impl] object ReflectionHelper {
       )
     }
     parameters.foreach {
-      case MainArgumentParameterHandler(inClass) if !inClass.isAssignableFrom(serviceMethod.inputType.typeClass) =>
+      case MainArgumentParameterHandler(inClass)
+          if !(inClass.isAssignableFrom(serviceMethod.inputType.typeClass) || classOf[util.List[_]]
+            .isAssignableFrom(inClass)) =>
         throw new RuntimeException(
           s"Incompatible command class $inClass for command $name, expected ${serviceMethod.inputType.typeClass}"
         )
@@ -122,12 +124,15 @@ private[impl] object ReflectionHelper {
         .setValue(serviceMethod.outputType.asInstanceOf[ResolvedType[Any]].toByteString(result))
         .build()
 
-    private def verifyOutputType(t: Type): Unit =
-      if (!serviceMethod.outputType.typeClass.isAssignableFrom(getRawType(t))) {
+    private def verifyOutputType(t: Type): Unit = {
+      val rawType = getRawType(t)
+      if (!(serviceMethod.outputType.typeClass.isAssignableFrom(rawType) || classOf[util.List[_]]
+            .isAssignableFrom(rawType))) {
         throw new RuntimeException(
           s"Incompatible return class $t for command $name, expected ${serviceMethod.outputType.typeClass}"
         )
       }
+    }
 
     private val handleResult: AnyRef => Optional[JavaPbAny] = if (method.getReturnType == Void.TYPE) { _ =>
       Optional.empty()
@@ -164,8 +169,7 @@ private[impl] object ReflectionHelper {
         }
       } else {
         verifyOutputType(method.getReturnType)
-        //result => Optional.of(serialize(result))
-        result => util.Collections.singletonList(serialize(result)) // FIXME: not sure here, should be test.
+        result => util.Collections.singletonList(serialize(result))
       }
     }
 

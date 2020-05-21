@@ -60,8 +60,6 @@ class StatelessFunctionImpl(_system: ActorSystem,
   private final val services = _services.iterator.toMap
 
   // FIXME how to access the serviceName for creating the service? The serviceName is in io.cloudstate.protocol.function.FunctionCommand
-  //private val service = services.getOrElse("init.serviceName", throw new RuntimeException(s"Service not found: init.serviceName"))
-  //private val handler: StatelessHandler = service.factory.create(StatelessContextImpl)
   private val handlerRunner = new StatelessHandlerRunner()
 
   // FIXME FunctionCommand should have id?
