@@ -2,6 +2,7 @@ package io.cloudstate.javasupport.function;
 
 import com.google.protobuf.Any;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -13,4 +14,8 @@ import java.util.Optional;
 public interface StatelessHandler {
 
   Optional<Any> handleCommand(Any command, CommandContext context);
+
+  Optional<Any> handleStreamInCommand(List<Any> commands, CommandContext context);
+
+  List<Any> handleStreamOutCommand(Any command, CommandContext context);
 }

@@ -7,7 +7,10 @@ import io.cloudstate.javasupport.crdt.CrdtEntity;
 import io.cloudstate.javasupport.crdt.CrdtEntityFactory;
 import io.cloudstate.javasupport.eventsourced.EventSourcedEntity;
 import io.cloudstate.javasupport.eventsourced.EventSourcedEntityFactory;
+import io.cloudstate.javasupport.function.Stateless;
+import io.cloudstate.javasupport.impl.AnnotationBasedStatelessSupport;
 import io.cloudstate.javasupport.impl.AnySupport;
+import io.cloudstate.javasupport.impl.StatelessFunctionService;
 import io.cloudstate.javasupport.impl.crdt.AnnotationBasedCrdtSupport;
 import io.cloudstate.javasupport.impl.crdt.CrdtStatefulService;
 import io.cloudstate.javasupport.impl.eventsourced.AnnotationBasedEventSourcedSupport;
@@ -207,6 +210,27 @@ public final class CloudState {
     services.put(
         descriptor.getFullName(),
         new CrdtStatefulService(factory, descriptor, newAnySupport(additionalDescriptors)));
+
+    return this;
+  }
+
+  public CloudState registerStatelessFunction(
+      Class<?> entityClass,
+      Descriptors.ServiceDescriptor descriptor,
+      Descriptors.FileDescriptor... additionalDescriptors) {
+
+    Stateless entity = entityClass.getAnnotation(Stateless.class);
+    if (entity == null) {
+      throw new IllegalArgumentException(
+          entityClass + " does not declare an " + Stateless.class + " annotation!");
+    }
+
+    final AnySupport anySupport = newAnySupport(additionalDescriptors);
+
+    services.put(
+        descriptor.getFullName(),
+        new StatelessFunctionService(
+            new AnnotationBasedStatelessSupport(entityClass, anySupport, descriptor), descriptor));
 
     return this;
   }

@@ -16,7 +16,12 @@
 
 package io.cloudstate.javasupport.impl
 
+import java.util
+import java.util.Optional
+
+import akka.NotUsed
 import akka.actor.ActorSystem
+import akka.event.Logging
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
 import com.google.protobuf.Descriptors
@@ -27,12 +32,10 @@ import io.cloudstate.protocol.entity.{Failure, Reply}
 import io.cloudstate.protocol.function.FunctionReply.Response
 import io.cloudstate.protocol.function._
 
+import scala.collection.immutable
 import scala.concurrent.Future
 
-class StatelessFunctionService(val factory: StatelessFactory,
-                               override val descriptor: Descriptors.ServiceDescriptor,
-                               val anySupport: AnySupport,
-                               override val persistenceId: String)
+class StatelessFunctionService(val factory: StatelessFactory, override val descriptor: Descriptors.ServiceDescriptor)
     extends StatefulService {
 
   override def entityType: String = StatelessFunction.name
@@ -50,27 +53,31 @@ class StatelessFunctionImpl(_system: ActorSystem,
                             rootContext: Context)(implicit mat: Materializer)
     extends StatelessFunction {
 
+  private[this] final val log = Logging.getLogger(_system, this.getClass)
+
   private final val system = _system
   private implicit val ec = _system.dispatcher
   private final val services = _services.iterator.toMap
 
   // FIXME how to access the serviceName for creating the service? The serviceName is in io.cloudstate.protocol.function.FunctionCommand
-  private val service =
-    services.getOrElse("init.serviceName", throw new RuntimeException(s"Service not found: init.serviceName"))
-  private val handler: StatelessHandler = service.factory.create(StatelessContextImpl)
+  //private val service = services.getOrElse("init.serviceName", throw new RuntimeException(s"Service not found: init.serviceName"))
+  //private val handler: StatelessHandler = service.factory.create(StatelessContextImpl)
+  private val handlerRunner = new StatelessHandlerRunner()
 
-  override def handleUnary(
-      in: io.cloudstate.protocol.function.FunctionCommand
-  ): scala.concurrent.Future[io.cloudstate.protocol.function.FunctionReply] =
-    in.payload match {
-      case Some(value) =>
-        // FIXME deal with exception?
-        // FIXME how to deal with commandId? Do we need the commandId for the CommandContextImpl
-        Future {
-          val context = new CommandContextImpl(in.name, 0)
-          val reply = handler.handleCommand(ScalaPbAny.toJavaProto(value), context)
-          val scalaReply = ScalaPbAny.fromJavaProto(reply.get()) // FIXME reply empty?
-          FunctionReply(Response.Reply(Reply(Some(scalaReply))), context.sideEffects)
+  // FIXME FunctionCommand should have id?
+  // FIXME deal with forward?
+  // FIXME how to deal with commandId? Do we need the commandId for the CommandContextImpl
+  override def handleUnary(command: FunctionCommand): Future[FunctionReply] = {
+    log.info(s"handleUnary called command - $command")
+    command.payload match {
+      case Some(p) =>
+        Future.unit.map { _ =>
+          val context = new CommandContextImpl(command.name)
+          //val reply = handler.handleCommand(ScalaPbAny.toJavaProto(p), context) // FIXME deal with exception?
+          val reply = handlerRunner.handleCommand(command, context) // FIXME deal with exception?
+          context.deactivate()
+          val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
+          FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
         }
 
       case None =>
@@ -78,55 +85,99 @@ class StatelessFunctionImpl(_system: ActorSystem,
           FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
         )
     }
-
-  override def handleStreamedIn(
-      in: akka.stream.scaladsl.Source[io.cloudstate.protocol.function.FunctionCommand, akka.NotUsed]
-  ): scala.concurrent.Future[io.cloudstate.protocol.function.FunctionReply] =
-    in.runWith(Sink.seq)
-      .map { commands =>
-        val functionReplies = commands.map { command =>
-          command.payload match {
-            case Some(value) =>
-              val context = new CommandContextImpl(command.name, 0)
-              val reply = handler.handleCommand(ScalaPbAny.toJavaProto(value), context)
-              val scalaReply = ScalaPbAny.fromJavaProto(reply.get()) // FIXME reply empty?
-              FunctionReply(Response.Reply(Reply(Some(scalaReply))), context.sideEffects)
-
-            case None =>
-              FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
-          }
-        }
-        // FIXME how to aggregate Seq[FunctionReply] to one FunctionReply
-        functionReplies.head
-      }
-
-  override def handleStreamedOut(
-      in: io.cloudstate.protocol.function.FunctionCommand
-  ): akka.stream.scaladsl.Source[io.cloudstate.protocol.function.FunctionReply, akka.NotUsed] = {
-    val executed = in.payload match {
-      case Some(value) =>
-        // FIXME deal with exception?
-        // FIXME how to deal with commandId? Do we need the commandId for the CommandContextImpl
-        Future {
-          val context = new CommandContextImpl(in.name, 0)
-          val reply = handler.handleCommand(ScalaPbAny.toJavaProto(value), context)
-          val scalaReply = ScalaPbAny.fromJavaProto(reply.get()) // FIXME reply empty?
-          FunctionReply(Response.Reply(Reply(Some(scalaReply))), context.sideEffects)
-        }
-
-      case None =>
-        Future.successful(
-          FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
-        )
-    }
-
-    // FIXME how to create a Source[FunctionReply] from one FunctionReply
-    Source.fromFuture(executed)
   }
 
-  override def handleStreamed(
-      in: akka.stream.scaladsl.Source[io.cloudstate.protocol.function.FunctionCommand, akka.NotUsed]
-  ): akka.stream.scaladsl.Source[io.cloudstate.protocol.function.FunctionReply, akka.NotUsed] = ???
+  override def handleStreamedIn(commandSource: Source[FunctionCommand, NotUsed]): Future[FunctionReply] = {
+    log.info(s"handleStreamedIn called")
+    commandSource
+      .runWith(Sink.seq)
+      .map { commands =>
+        //validation - check name and service name for all commands
+        //validation - check payload for all commands
+        if (commands.exists(_.payload.isEmpty)) {
+          FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
+        } else {
+          //import scala.collection.JavaConverters._
+          //val javaAnyCommands = commands.map(command => ScalaPbAny.toJavaProto(command.payload.get))
+          val context = new CommandContextImpl(commands.head.name)
+          //val reply = handler.handleStreamInCommand(javaAnyCommands.asJava, context)
+          val reply = handlerRunner.handleStreamInCommand(commands, context)
+          context.deactivate()
+          val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
+          FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
+        }
+      }
+  }
+
+  override def handleStreamedOut(command: FunctionCommand): Source[FunctionReply, NotUsed] =
+    command.payload match {
+      case Some(value) =>
+        val context = new CommandContextImpl(command.name)
+        //val replies = handler.handleStreamOutCommand(ScalaPbAny.toJavaProto(value), context) // FIXME deal with exception?
+        val replies = handlerRunner.handleStreamOutCommand(command, context) // FIXME deal with exception?
+        Source.fromIterator { () =>
+          import scala.collection.JavaConverters._
+          replies.asScala
+            .map(r => FunctionReply(Response.Reply(Reply(Some(ScalaPbAny.fromJavaProto(r)))), context.sideEffects))
+            .iterator
+        }
+
+      case None =>
+        Source.single(
+          FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
+        )
+    }
+
+  override def handleStreamed(commandSource: Source[FunctionCommand, NotUsed]): Source[FunctionReply, NotUsed] =
+    commandSource.map { command =>
+      command.payload match {
+        case Some(p) =>
+          val context = new CommandContextImpl(command.name)
+          //val reply = handler.handleCommand(ScalaPbAny.toJavaProto(p), context) // FIXME deal with exception?
+          val reply = handlerRunner.handleCommand(command, context) // FIXME deal with exception?
+          context.deactivate()
+          val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
+          FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
+
+        case None =>
+          FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
+      }
+    }
+
+  private class StatelessHandlerRunner() {
+    import com.google.protobuf.{Any => JavaPbAny}
+
+    private var handlerInit = false
+    private var handler: StatelessHandler = _
+
+    def handleCommand(command: FunctionCommand, context: CommandContext): Optional[JavaPbAny] = {
+      mayBeInit(command.serviceName)
+      handler.handleCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
+    }
+
+    def handleStreamInCommand(commands: immutable.Seq[FunctionCommand],
+                              context: CommandContext): Optional[JavaPbAny] = {
+      import scala.collection.JavaConverters._
+      mayBeInit(commands.head.serviceName)
+      val javaAnyCommands = commands.map(command => ScalaPbAny.toJavaProto(command.payload.get))
+      handler.handleStreamInCommand(javaAnyCommands.asJava, context) // how to map it to user function input parameter
+    }
+
+    def handleStreamOutCommand(command: FunctionCommand, context: CommandContext): util.List[JavaPbAny] = {
+      mayBeInit(command.serviceName)
+      handler.handleStreamOutCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
+    }
+
+    private def mayBeInit(serviceName: String): StatelessHandler =
+      if (!handlerInit) {
+        val service = services.getOrElse(serviceName, throw new RuntimeException(s"Service not found: ${serviceName}"))
+        handler = service.factory.create(StatelessContextImpl)
+        handlerInit = true
+        handler
+      } else {
+        handler
+      }
+  }
 
   trait AbstractContext extends Context {
     override def serviceCallFactory(): ServiceCallFactory = rootContext.serviceCallFactory()
@@ -134,10 +185,13 @@ class StatelessFunctionImpl(_system: ActorSystem,
 
   case object StatelessContextImpl extends Context with AbstractContext
 
-  class CommandContextImpl(override val commandName: String, override val commandId: Long)
+  class CommandContextImpl(override val commandName: String)
       extends CommandContext
       with AbstractContext
       with AbstractClientActionContext
       with AbstractEffectContext
-      with ActivatableContext
+      with ActivatableContext {
+    override def commandId: Long =
+      Long.MinValue // FIXME how to deal with commandId? Do we need the commandId for the CommandContextImpl?
+  }
 }

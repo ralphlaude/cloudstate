@@ -1,6 +1,7 @@
 package io.cloudstate.javasupport.impl
 
 import java.lang.reflect.{Constructor, InvocationTargetException}
+import java.util
 import java.util.Optional
 
 import com.google.protobuf.{Descriptors, Any => JavaPbAny}
@@ -50,6 +51,28 @@ private[impl] class AnnotationBasedStatelessSupport(
         )
       }
     }
+
+    override def handleStreamInCommand(commands: util.List[JavaPbAny], context: CommandContext): Optional[JavaPbAny] =
+      unwrap {
+        behavior.commandHandlers.get(context.commandName()).map { handler =>
+          handler.invoke(entity, commands, context)
+        } getOrElse {
+          throw new RuntimeException(
+            s"No command handler found for command [${context.commandName()}] on $behaviorsString"
+          )
+        }
+      }
+
+    override def handleStreamOutCommand(command: JavaPbAny, context: CommandContext): util.List[JavaPbAny] =
+      unwrap {
+        behavior.commandHandlers.get(context.commandName()).map { handler =>
+          handler.invokeNew(entity, command, context)
+        } getOrElse {
+          throw new RuntimeException(
+            s"No command handler found for command [${context.commandName()}] on $behaviorsString"
+          )
+        }
+      }
 
     private def unwrap[T](block: => T): T =
       try {

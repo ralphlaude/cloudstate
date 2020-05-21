@@ -2,6 +2,7 @@ package io.cloudstate.javasupport.impl
 
 import java.lang.annotation.Annotation
 import java.lang.reflect.{AccessibleObject, Executable, Member, Method, ParameterizedType, Type, WildcardType}
+import java.util
 import java.util.Optional
 
 import io.cloudstate.javasupport.{Context, EntityContext, EntityId, ServiceCallFactory}
@@ -146,11 +147,49 @@ private[impl] object ReflectionHelper {
       result => Optional.of(serialize(result))
     }
 
+    private val handleResults: AnyRef => util.List[JavaPbAny] = {
+      if (method.getReturnType == Void.TYPE) { _ =>
+        util.Collections.emptyList()
+      } else if (method.getReturnType == classOf[util.List[_]]) {
+        verifyOutputType(getFirstParameter(method.getGenericReturnType))
+
+        result => {
+          import scala.collection.JavaConverters._
+          val asList = result.asInstanceOf[util.List[AnyRef]]
+          if (!asList.isEmpty) {
+            asList.asScala.map(serialize).asJava
+          } else {
+            util.Collections.emptyList()
+          }
+        }
+      } else {
+        verifyOutputType(method.getReturnType)
+        //result => Optional.of(serialize(result))
+        result => util.Collections.singletonList(serialize(result)) // FIXME: not sure here, should be test.
+      }
+    }
+
     def invoke(obj: AnyRef, command: JavaPbAny, context: CommandContext): Optional[JavaPbAny] = {
       val decodedCommand = serviceMethod.inputType.parseFrom(command.getValue).asInstanceOf[AnyRef]
       val ctx = InvocationContext(decodedCommand, context)
       val result = method.invoke(obj, parameters.map(_.apply(ctx)): _*)
       handleResult(result)
+    }
+
+    def invoke(obj: AnyRef, commands: util.List[JavaPbAny], context: CommandContext): Optional[JavaPbAny] = {
+      import scala.collection.JavaConverters._
+      val decodedCommands =
+        commands.asScala.map(command => serviceMethod.inputType.parseFrom(command.getValue).asInstanceOf[AnyRef]).asJava
+      val ctx = InvocationContext(decodedCommands, context)
+      val result = method.invoke(obj, parameters.map(_.apply(ctx)): _*)
+      handleResult(result)
+    }
+
+    def invokeNew(obj: AnyRef, command: JavaPbAny, context: CommandContext): util.List[JavaPbAny] = {
+      val decodedCommand = serviceMethod.inputType.parseFrom(command.getValue).asInstanceOf[AnyRef]
+      val ctx = InvocationContext(decodedCommand, context)
+      val result = method.invoke(obj, parameters.map(_.apply(ctx)): _*)
+      handleResults(result)
     }
   }
 
