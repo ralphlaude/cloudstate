@@ -16,9 +16,6 @@
 
 package io.cloudstate.javasupport.impl
 
-import java.util
-import java.util.Optional
-
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.event.Logging
@@ -32,7 +29,6 @@ import io.cloudstate.protocol.entity.{Failure, Reply}
 import io.cloudstate.protocol.function.FunctionReply.Response
 import io.cloudstate.protocol.function._
 
-import scala.collection.immutable
 import scala.concurrent.Future
 
 class StatelessFunctionService(val factory: StatelessFactory, override val descriptor: Descriptors.ServiceDescriptor)
@@ -166,45 +162,6 @@ class StatelessFunctionImpl(_system: ActorSystem,
       handler = service.factory.create(StatelessContextImpl)
       handlerInit = true
     }
-
-  private class StatelessHandlerRunner() {
-    import com.google.protobuf.{Any => JavaPbAny}
-
-    private var handlerInit = false
-    private var handler: StatelessHandler = _
-
-    def handleCommand(command: FunctionCommand, context: CommandContext): Optional[JavaPbAny] = {
-      mayBeInit(command.serviceName)
-      command.payload match {
-        case Some(p) => handler.handleCommand(ScalaPbAny.toJavaProto(p), context)
-        case None => Optional.empty[JavaPbAny]()
-      }
-
-    }
-
-    def handleStreamInCommand(commands: immutable.Seq[FunctionCommand],
-                              context: CommandContext): Optional[JavaPbAny] = {
-      import scala.collection.JavaConverters._
-
-      mayBeInit(commands.head.serviceName)
-
-      val javaAnyCommands = commands.map(command => ScalaPbAny.toJavaProto(command.payload.get))
-      handler.handleStreamInCommand(javaAnyCommands.asJava, context)
-    }
-
-    def handleStreamOutCommand(command: FunctionCommand, context: CommandContext): util.List[JavaPbAny] = {
-      mayBeInit(command.serviceName)
-
-      handler.handleStreamOutCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
-    }
-
-    private def mayBeInit(serviceName: String): Unit =
-      if (!handlerInit) {
-        val service = services.getOrElse(serviceName, throw new RuntimeException(s"Service not found: $serviceName"))
-        handler = service.factory.create(StatelessContextImpl)
-        handlerInit = true
-      }
-  }
 
   trait AbstractContext extends Context {
     override def serviceCallFactory(): ServiceCallFactory = rootContext.serviceCallFactory()
