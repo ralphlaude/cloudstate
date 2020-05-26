@@ -37,4 +37,10 @@ public class ShoppingCartStateless {
     logger.info("addItemStreamOut called item - " + item.getName());
     return Collections.singletonList(ItemAdded.newBuilder().build());
   }
+
+  @CommandHandler
+  public ItemAdded addItemStreamed(AddLineItem item, CommandContext ctx) {
+    logger.info("addItemStreamOut called item - " + item.getName());
+    return ItemAdded.newBuilder().build();
+  }
 }

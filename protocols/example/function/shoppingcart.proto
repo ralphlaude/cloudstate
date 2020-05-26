@@ -17,18 +17,10 @@ message AddLineItem {
     int32 quantity = 4;
 }
 
-message AddLineItems {
-    repeated AddLineItem items = 1;
-}
-
 message ItemAdded {
     string productId = 1;
     string name = 2;
     int32 quantity = 3;
-}
-
-message ItemsAdded {
-    repeated ItemAdded items = 1;
 }
 
 service ShoppingCart {

@@ -66,7 +66,7 @@ private[impl] class AnnotationBasedStatelessSupport(
     override def handleStreamOutCommand(command: JavaPbAny, context: CommandContext): util.List[JavaPbAny] =
       unwrap {
         behavior.commandHandlers.get(context.commandName()).map { handler =>
-          handler.invokeNew(entity, command, context)
+          handler.invokeWithResults(entity, command, context)
         } getOrElse {
           throw new RuntimeException(
             s"No command handler found for command [${context.commandName()}] on $behaviorsString"

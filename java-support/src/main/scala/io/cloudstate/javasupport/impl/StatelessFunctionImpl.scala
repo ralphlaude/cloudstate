@@ -59,20 +59,20 @@ class StatelessFunctionImpl(_system: ActorSystem,
   private implicit val ec = _system.dispatcher
   private final val services = _services.iterator.toMap
 
-  // FIXME how to access the serviceName for creating the service? The serviceName is in io.cloudstate.protocol.function.FunctionCommand
-  private val handlerRunner = new StatelessHandlerRunner()
+  private final var handlerInit = false
+  private final var handler: StatelessHandler = _
 
   // FIXME FunctionCommand should have id?
   // FIXME deal with forward?
   // FIXME how to deal with commandId? Do we need the commandId for the CommandContextImpl
   override def handleUnary(command: FunctionCommand): Future[FunctionReply] = {
     log.info(s"handleUnary called command - $command")
+    mayBeInit(command.serviceName)
     command.payload match {
       case Some(p) =>
         Future.unit.map { _ =>
           val context = new CommandContextImpl(command.name)
-          //val reply = handler.handleCommand(ScalaPbAny.toJavaProto(p), context) // FIXME deal with exception?
-          val reply = handlerRunner.handleCommand(command, context) // FIXME deal with exception?
+          val reply = handler.handleCommand(ScalaPbAny.toJavaProto(p), context) // FIXME deal with exception?
           context.deactivate()
           val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
           FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
@@ -88,6 +88,12 @@ class StatelessFunctionImpl(_system: ActorSystem,
   override def handleStreamedIn(commandSource: Source[FunctionCommand, NotUsed]): Future[FunctionReply] = {
     log.info(s"handleStreamedIn called")
     commandSource
+      .prefixAndTail(1)
+      .flatMapConcat {
+        case (firstCommands, source) =>
+          mayBeInit(firstCommands.head.serviceName)
+          Source(firstCommands).concat(source)
+      }
       .runWith(Sink.seq)
       .map { commands =>
         //validation - check name and service name for all commands
@@ -95,11 +101,10 @@ class StatelessFunctionImpl(_system: ActorSystem,
         if (commands.exists(_.payload.isEmpty)) {
           FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
         } else {
-          //import scala.collection.JavaConverters._
-          //val javaAnyCommands = commands.map(command => ScalaPbAny.toJavaProto(command.payload.get))
+          import scala.collection.JavaConverters._
+          val javaAnyCommands = commands.map(command => ScalaPbAny.toJavaProto(command.payload.get))
           val context = new CommandContextImpl(commands.head.name)
-          //val reply = handler.handleStreamInCommand(javaAnyCommands.asJava, context)
-          val reply = handlerRunner.handleStreamInCommand(commands, context)
+          val reply = handler.handleStreamInCommand(javaAnyCommands.asJava, context)
           context.deactivate()
           val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
           FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
@@ -107,12 +112,14 @@ class StatelessFunctionImpl(_system: ActorSystem,
       }
   }
 
-  override def handleStreamedOut(command: FunctionCommand): Source[FunctionReply, NotUsed] =
+  override def handleStreamedOut(command: FunctionCommand): Source[FunctionReply, NotUsed] = {
+    log.info(s"handleStreamedOut called")
+    mayBeInit(command.serviceName)
     command.payload match {
       case Some(value) =>
         val context = new CommandContextImpl(command.name)
-        //val replies = handler.handleStreamOutCommand(ScalaPbAny.toJavaProto(value), context) // FIXME deal with exception?
-        val replies = handlerRunner.handleStreamOutCommand(command, context) // FIXME deal with exception?
+        val replies = handler.handleStreamOutCommand(ScalaPbAny.toJavaProto(value), context) // FIXME deal with exception?
+        context.deactivate()
         Source.fromIterator { () =>
           import scala.collection.JavaConverters._
           replies.asScala
@@ -125,21 +132,39 @@ class StatelessFunctionImpl(_system: ActorSystem,
           FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
         )
     }
+  }
 
-  override def handleStreamed(commandSource: Source[FunctionCommand, NotUsed]): Source[FunctionReply, NotUsed] =
-    commandSource.map { command =>
-      command.payload match {
-        case Some(p) =>
-          val context = new CommandContextImpl(command.name)
-          //val reply = handler.handleCommand(ScalaPbAny.toJavaProto(p), context) // FIXME deal with exception?
-          val reply = handlerRunner.handleCommand(command, context) // FIXME deal with exception?
-          context.deactivate()
-          val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
-          FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
-
-        case None =>
-          FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
+  override def handleStreamed(commandSource: Source[FunctionCommand, NotUsed]): Source[FunctionReply, NotUsed] = {
+    log.info(s"handleStreamed called")
+    commandSource
+      .prefixAndTail(1)
+      .flatMapConcat {
+        case (firstCommands, source) =>
+          mayBeInit(firstCommands.head.serviceName)
+          Source(firstCommands).concat(source)
       }
+      .map { command =>
+        //validation - check name and service name for all commands
+        //validation - check payload for all commands
+        command.payload match {
+          case Some(p) =>
+            val context = new CommandContextImpl(command.name)
+            val reply = handler.handleCommand(ScalaPbAny.toJavaProto(p), context) // FIXME deal with exception?
+            context.deactivate()
+            val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
+            FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
+
+          case None =>
+            FunctionReply(Response.Failure(Failure(description = "payload cannot be empty")))
+        }
+      }
+  }
+
+  private def mayBeInit(serviceName: String): Unit =
+    if (!handlerInit) {
+      val service = services.getOrElse(serviceName, throw new RuntimeException(s"Service not found: $serviceName"))
+      handler = service.factory.create(StatelessContextImpl)
+      handlerInit = true
     }
 
   private class StatelessHandlerRunner() {
@@ -150,30 +175,34 @@ class StatelessFunctionImpl(_system: ActorSystem,
 
     def handleCommand(command: FunctionCommand, context: CommandContext): Optional[JavaPbAny] = {
       mayBeInit(command.serviceName)
-      handler.handleCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
+      command.payload match {
+        case Some(p) => handler.handleCommand(ScalaPbAny.toJavaProto(p), context)
+        case None => Optional.empty[JavaPbAny]()
+      }
+
     }
 
     def handleStreamInCommand(commands: immutable.Seq[FunctionCommand],
                               context: CommandContext): Optional[JavaPbAny] = {
       import scala.collection.JavaConverters._
+
       mayBeInit(commands.head.serviceName)
+
       val javaAnyCommands = commands.map(command => ScalaPbAny.toJavaProto(command.payload.get))
-      handler.handleStreamInCommand(javaAnyCommands.asJava, context) // how to map it to user function input parameter
+      handler.handleStreamInCommand(javaAnyCommands.asJava, context)
     }
 
     def handleStreamOutCommand(command: FunctionCommand, context: CommandContext): util.List[JavaPbAny] = {
       mayBeInit(command.serviceName)
+
       handler.handleStreamOutCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
     }
 
-    private def mayBeInit(serviceName: String): StatelessHandler =
+    private def mayBeInit(serviceName: String): Unit =
       if (!handlerInit) {
-        val service = services.getOrElse(serviceName, throw new RuntimeException(s"Service not found: ${serviceName}"))
+        val service = services.getOrElse(serviceName, throw new RuntimeException(s"Service not found: $serviceName"))
         handler = service.factory.create(StatelessContextImpl)
         handlerInit = true
-        handler
-      } else {
-        handler
       }
   }
 

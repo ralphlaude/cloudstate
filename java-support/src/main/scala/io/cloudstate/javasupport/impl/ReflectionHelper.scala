@@ -189,7 +189,8 @@ private[impl] object ReflectionHelper {
       handleResult(result)
     }
 
-    def invokeNew(obj: AnyRef, command: JavaPbAny, context: CommandContext): util.List[JavaPbAny] = {
+    //FIXME better name
+    def invokeWithResults(obj: AnyRef, command: JavaPbAny, context: CommandContext): util.List[JavaPbAny] = {
       val decodedCommand = serviceMethod.inputType.parseFrom(command.getValue).asInstanceOf[AnyRef]
       val ctx = InvocationContext(decodedCommand, context)
       val result = method.invoke(obj, parameters.map(_.apply(ctx)): _*)

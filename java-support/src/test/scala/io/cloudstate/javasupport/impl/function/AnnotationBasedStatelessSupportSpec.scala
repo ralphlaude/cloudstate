@@ -8,7 +8,7 @@ import com.google.protobuf.{ByteString, Any => JavaPbAny}
 import io.cloudstate.javasupport.impl.{AnnotationBasedStatelessSupport, AnySupport, ResolvedServiceMethod, ResolvedType}
 import io.cloudstate.javasupport._
 import io.cloudstate.javasupport.eventsourced.EventContext
-import io.cloudstate.javasupport.function.{CommandContext, CommandHandler, Stateless, StatelessCreationContext}
+import io.cloudstate.javasupport.function.{CommandContext, CommandHandler, Stateless, StatelessHandler}
 import org.scalatest.{Matchers, WordSpec}
 
 class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
@@ -23,8 +23,15 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
   object MockContext extends BaseContext
 
   class MockCommandContext extends CommandContext with BaseContext {
-    //override def commandName(): String = "AddItem"
-    override def commandName(): String = "AddItemStreamIn"
+    override def commandName(): String = "AddItem"
+    override def fail(errorMessage: String): RuntimeException = ???
+    override def forward(to: ServiceCall): Unit = ???
+    override def effect(effect: ServiceCall, synchronous: Boolean): Unit = ???
+  }
+
+  class StreamingInMockCommandContext extends CommandContext with BaseContext {
+    override def commandName(): String =
+      "AddItemStreamIn" // FIXME add test for streaming in, streaming out and streamed
     override def fail(errorMessage: String): RuntimeException = ???
     override def forward(to: ServiceCall): Unit = ???
     override def effect(effect: ServiceCall, synchronous: Boolean): Unit = ???
@@ -48,23 +55,27 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
   val anySupport = new AnySupport(Array(Shoppingcart.getDescriptor), this.getClass.getClassLoader)
   val descriptor = Shoppingcart.getDescriptor
     .findServiceByName("ShoppingCart")
-    //.findMethodByName("AddItem")
-    .findMethodByName("AddItemStreamIn")
+    .findMethodByName("AddItem")
   val method = ResolvedServiceMethod(descriptor, StringResolvedType, WrappedResolvedType)
 
-  def create(behavior: AnyRef, methods: ResolvedServiceMethod[_, _]*) =
+  val streamingInDescriptor = Shoppingcart.getDescriptor
+    .findServiceByName("ShoppingCart")
+    .findMethodByName("AddItemStreamIn")
+  val streamingInMethod = ResolvedServiceMethod(streamingInDescriptor, StringResolvedType, WrappedResolvedType)
+
+  def create(behavior: AnyRef, methods: ResolvedServiceMethod[_, _]*): StatelessHandler =
     new AnnotationBasedStatelessSupport(behavior.getClass,
                                         anySupport,
                                         methods.map(m => m.descriptor.getName -> m).toMap,
                                         Some(_ => behavior)).create(MockContext)
 
-  def create(clazz: Class[_]) =
+  def create(clazz: Class[_]): StatelessHandler =
     new AnnotationBasedStatelessSupport(clazz, anySupport, Map.empty, None).create(MockContext)
 
   def command(str: String) =
     ScalaPbAny.toJavaProto(ScalaPbAny(StringResolvedType.typeUrl, StringResolvedType.toByteString(str)))
 
-  def decodeWrapped(any: JavaPbAny) = {
+  def decodeWrapped(any: JavaPbAny): Wrapped = {
     any.getTypeUrl should ===(WrappedResolvedType.typeUrl)
     WrappedResolvedType.parseFrom(any.getValue)
   }
@@ -76,17 +87,13 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
         create(classOf[NoArgConstructorTest])
       }
 
-      "there is a constructor with a EventSourcedEntityCreationContext parameter" in {
-        create(classOf[CreationContextArgConstructorTest])
-      }
-
       "fail if the constructor contains an unsupported parameter" in {
         a[RuntimeException] should be thrownBy create(classOf[UnsupportedConstructorParameter])
       }
 
     }
 
-    "support command handlers" when {
+    "support unary command handlers" when {
 
       "no arg command handler" in {
         val handler = create(new {
@@ -99,10 +106,10 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
       "single arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def addItemStreamIn(msg: String) = Wrapped(msg)
+          def addItem(msg: String) = Wrapped(msg)
         }, method)
         decodeWrapped(
-          handler.handleStreamInCommand(Collections.singletonList(command("blah")), new MockCommandContext).get
+          handler.handleCommand(command("blah"), new MockCommandContext).get
         ) should ===(Wrapped("blah"))
       }
 
@@ -165,6 +172,29 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
       }
 
     }
+
+    "support streaming in command handlers" when {
+      //FIXME Add tests
+      "single arg command handler" in {
+        val handler = create(new {
+          @CommandHandler
+          def addItemStreamIn(msg: java.util.List[String]): Wrapped = Wrapped(msg.get(0))
+        }, streamingInMethod)
+        decodeWrapped(
+          handler
+            .handleStreamInCommand(Collections.singletonList(command("blah")), new StreamingInMockCommandContext)
+            .get
+        ) should ===(Wrapped("blah"))
+      }
+    }
+
+    "support streaming out command handlers" when {
+      //FIXME Add tests
+    }
+
+    "support streamed command handlers" when {
+      //FIXME Add tests
+    }
   }
 
 }
@@ -173,11 +203,6 @@ import org.scalatest.Matchers._
 
 @Stateless
 private class NoArgConstructorTest() {}
-
-@Stateless
-private class CreationContextArgConstructorTest(ctx: StatelessCreationContext) {
-  //ctx.entityId should ===("foo")
-}
 
 @Stateless
 private class UnsupportedConstructorParameter(foo: String)
