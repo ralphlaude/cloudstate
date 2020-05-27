@@ -5,10 +5,9 @@ import java.util.Collections
 import com.example.stateless.shoppingcart.Shoppingcart
 import com.google.protobuf.any.{Any => ScalaPbAny}
 import com.google.protobuf.{ByteString, Any => JavaPbAny}
-import io.cloudstate.javasupport.impl.{AnnotationBasedStatelessSupport, AnySupport, ResolvedServiceMethod, ResolvedType}
 import io.cloudstate.javasupport._
-import io.cloudstate.javasupport.eventsourced.EventContext
 import io.cloudstate.javasupport.function.{CommandContext, CommandHandler, Stateless, StatelessHandler}
+import io.cloudstate.javasupport.impl.{AnnotationBasedStatelessSupport, AnySupport, ResolvedServiceMethod, ResolvedType}
 import org.scalatest.{Matchers, WordSpec}
 
 class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
@@ -30,8 +29,14 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
   }
 
   class StreamingInMockCommandContext extends CommandContext with BaseContext {
-    override def commandName(): String =
-      "AddItemStreamIn" // FIXME add test for streaming in, streaming out and streamed
+    override def commandName(): String = "AddItemStreamIn"
+    override def fail(errorMessage: String): RuntimeException = ???
+    override def forward(to: ServiceCall): Unit = ???
+    override def effect(effect: ServiceCall, synchronous: Boolean): Unit = ???
+  }
+
+  class StreamingOutMockCommandContext extends CommandContext with BaseContext {
+    override def commandName(): String = "AddItemStreamOut"
     override def fail(errorMessage: String): RuntimeException = ???
     override def forward(to: ServiceCall): Unit = ???
     override def effect(effect: ServiceCall, synchronous: Boolean): Unit = ???
@@ -53,15 +58,23 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
 
   case class Wrapped(value: String)
   val anySupport = new AnySupport(Array(Shoppingcart.getDescriptor), this.getClass.getClassLoader)
-  val descriptor = Shoppingcart.getDescriptor
-    .findServiceByName("ShoppingCart")
-    .findMethodByName("AddItem")
-  val method = ResolvedServiceMethod(descriptor, StringResolvedType, WrappedResolvedType)
+  val method = ResolvedServiceMethod(
+    Shoppingcart.getDescriptor.findServiceByName("ShoppingCart").findMethodByName("AddItem"),
+    StringResolvedType,
+    WrappedResolvedType
+  )
 
-  val streamingInDescriptor = Shoppingcart.getDescriptor
-    .findServiceByName("ShoppingCart")
-    .findMethodByName("AddItemStreamIn")
-  val streamingInMethod = ResolvedServiceMethod(streamingInDescriptor, StringResolvedType, WrappedResolvedType)
+  val streamingInMethod = ResolvedServiceMethod(
+    Shoppingcart.getDescriptor.findServiceByName("ShoppingCart").findMethodByName("AddItemStreamIn"),
+    StringResolvedType,
+    WrappedResolvedType
+  )
+
+  val streamingOutMethod = ResolvedServiceMethod(
+    Shoppingcart.getDescriptor.findServiceByName("ShoppingCart").findMethodByName("AddItemStreamOut"),
+    StringResolvedType,
+    WrappedResolvedType
+  )
 
   def create(behavior: AnyRef, methods: ResolvedServiceMethod[_, _]*): StatelessHandler =
     new AnnotationBasedStatelessSupport(behavior.getClass,
@@ -92,7 +105,6 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
       }
 
     }
-
     "support unary command handlers" when {
 
       "no arg command handler" in {
@@ -128,7 +140,7 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
       "fail if there's a bad context type" in {
         a[RuntimeException] should be thrownBy create(new {
           @CommandHandler
-          def addItem(msg: String, ctx: EventContext) =
+          def addItem(msg: String, ctx: MockCommandContext) =
             Wrapped(msg)
         }, method)
       }
@@ -170,36 +182,188 @@ class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
         val ex = the[RuntimeException] thrownBy handler.handleCommand(command("nothing"), new MockCommandContext)
         ex.getMessage should ===("foo")
       }
-
     }
 
     "support streaming in command handlers" when {
-      //FIXME Add tests
+      "no arg command handler" in {
+        val handler = create(new {
+          @CommandHandler
+          def addItemStreamIn(): Wrapped = Wrapped("blah")
+        }, streamingInMethod)
+        val ctx = new StreamingInMockCommandContext
+        decodeWrapped(handler.handleStreamInCommand(Collections.singletonList(command("nothing")), ctx).get) should ===(
+          Wrapped("blah")
+        )
+      }
+
       "single arg command handler" in {
         val handler = create(new {
           @CommandHandler
           def addItemStreamIn(msg: java.util.List[String]): Wrapped = Wrapped(msg.get(0))
         }, streamingInMethod)
+        val ctx = new StreamingInMockCommandContext
         decodeWrapped(
-          handler
-            .handleStreamInCommand(Collections.singletonList(command("blah")), new StreamingInMockCommandContext)
-            .get
+          handler.handleStreamInCommand(Collections.singletonList(command("blah")), ctx).get
         ) should ===(Wrapped("blah"))
+      }
+
+      "multi arg command handler" in {
+        val handler = create(
+          new {
+            @CommandHandler
+            def addItemStreamIn(msg: java.util.List[String], ctx: CommandContext): Wrapped = {
+              ctx.commandName() should ===("AddItemStreamIn")
+              Wrapped(msg.get(0))
+            }
+          },
+          streamingInMethod
+        )
+        val ctx = new StreamingInMockCommandContext
+        decodeWrapped(handler.handleStreamInCommand(Collections.singletonList(command("blah")), ctx).get) should ===(
+          Wrapped("blah")
+        )
+      }
+
+      "fail if there's a bad context type" in {
+        a[RuntimeException] should be thrownBy create(new {
+          @CommandHandler
+          def addItemStreamIn(msg: java.util.List[String], ctx: StreamingInMockCommandContext): Wrapped =
+            Wrapped(msg.get(0))
+        }, streamingInMethod)
+      }
+
+      "fail if there's two command handlers for the same command" in {
+        a[RuntimeException] should be thrownBy create(
+          new {
+            @CommandHandler
+            def addItemStreamIn(msg: String, ctx: CommandContext): Wrapped = Wrapped(msg)
+
+            @CommandHandler
+            def addItemStreamIn(msg: String): Wrapped = Wrapped(msg)
+          },
+          streamingInMethod
+        )
+      }
+
+      "fail if there's no command with that name" in {
+        a[RuntimeException] should be thrownBy create(new {
+          @CommandHandler
+          def wrongName(msg: String): Wrapped = Wrapped(msg)
+        }, streamingInMethod)
+      }
+
+      "fail if there's a CRDT command handler" in {
+        val ex = the[RuntimeException] thrownBy create(new {
+            @io.cloudstate.javasupport.crdt.CommandHandler
+            def addItemStreamIn(msg: String): Wrapped = Wrapped(msg)
+          }, streamingInMethod)
+        ex.getMessage should include("Did you mean")
+        ex.getMessage should include(classOf[CommandHandler].getName)
+      }
+
+      "unwrap exceptions" in {
+        val handler = create(new {
+          @CommandHandler
+          def addItemStreamIn(): Wrapped = throw new RuntimeException("foo")
+        }, streamingInMethod)
+        val ctx = new StreamingInMockCommandContext
+        val ex = the[RuntimeException] thrownBy handler.handleStreamInCommand(
+            Collections.singletonList(command("nothing")),
+            ctx
+          )
+        ex.getMessage should ===("foo")
       }
     }
 
     "support streaming out command handlers" when {
-      //FIXME Add tests
-    }
+      "no arg command handler" in {
+        val handler = create(new {
+          @CommandHandler
+          def addItemStreamOut(): Wrapped = Wrapped("blah")
+        }, streamingOutMethod)
+        val ctx = new StreamingOutMockCommandContext
+        decodeWrapped(handler.handleStreamOutCommand(command("nothing"), ctx).get(0)) should ===(
+          Wrapped("blah")
+        )
+      }
 
-    "support streamed command handlers" when {
-      //FIXME Add tests
+      "single arg command handler" in {
+        val handler = create(new {
+          @CommandHandler
+          def addItemStreamOut(msg: String): Wrapped = Wrapped(msg)
+        }, streamingOutMethod)
+        val ctx = new StreamingOutMockCommandContext
+        decodeWrapped(
+          handler.handleStreamOutCommand(command("blah"), ctx).get(0)
+        ) should ===(Wrapped("blah"))
+      }
+
+      "multi arg command handler" in {
+        val handler = create(
+          new {
+            @CommandHandler
+            def addItemStreamOut(msg: String, ctx: CommandContext): Wrapped = {
+              ctx.commandName() should ===("AddItemStreamOut")
+              Wrapped(msg)
+            }
+          },
+          streamingOutMethod
+        )
+        val ctx = new StreamingOutMockCommandContext
+        decodeWrapped(handler.handleStreamOutCommand(command("blah"), ctx).get(0)) should ===(
+          Wrapped("blah")
+        )
+      }
+
+      "fail if there's a bad context type" in {
+        a[RuntimeException] should be thrownBy create(new {
+          @CommandHandler
+          def addItemStreamOut(msg: String, ctx: StreamingOutMockCommandContext): Wrapped = Wrapped(msg)
+        }, streamingOutMethod)
+      }
+
+      "fail if there's two command handlers for the same command" in {
+        a[RuntimeException] should be thrownBy create(
+          new {
+            @CommandHandler
+            def addItemStreamOut(msg: String, ctx: CommandContext): Wrapped = Wrapped(msg)
+
+            @CommandHandler
+            def addItemStreamOut(msg: String): Wrapped = Wrapped(msg)
+          },
+          streamingOutMethod
+        )
+      }
+
+      "fail if there's no command with that name" in {
+        a[RuntimeException] should be thrownBy create(new {
+          @CommandHandler
+          def wrongName(msg: String): Wrapped = Wrapped(msg)
+        }, streamingOutMethod)
+      }
+
+      "fail if there's a CRDT command handler" in {
+        val ex = the[RuntimeException] thrownBy create(new {
+            @io.cloudstate.javasupport.crdt.CommandHandler
+            def addItemStreamOut(msg: String): Wrapped = Wrapped(msg)
+          }, streamingOutMethod)
+        ex.getMessage should include("Did you mean")
+        ex.getMessage should include(classOf[CommandHandler].getName)
+      }
+
+      "unwrap exceptions" in {
+        val handler = create(new {
+          @CommandHandler
+          def addItemStreamOut(): Wrapped = throw new RuntimeException("foo")
+        }, streamingOutMethod)
+        val ctx = new StreamingOutMockCommandContext
+        val ex = the[RuntimeException] thrownBy handler.handleStreamOutCommand(command("nothing"), ctx)
+        ex.getMessage should ===("foo")
+      }
     }
   }
 
 }
-
-import org.scalatest.Matchers._
 
 @Stateless
 private class NoArgConstructorTest() {}
