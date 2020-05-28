@@ -61,8 +61,6 @@ class StatelessFunctionImpl(_system: ActorSystem,
   private final var handler: StatelessHandler = _
 
   // FIXME FunctionCommand should have id?
-  // FIXME deal with forward?
-  // FIXME how to deal with commandId? Do we need the commandId for the CommandContextImpl
   override def handleUnary(command: FunctionCommand): Future[FunctionReply] = {
     log.info(s"handleUnary called command - $command")
     mayBeInit(command.serviceName)
@@ -78,8 +76,8 @@ class StatelessFunctionImpl(_system: ActorSystem,
         } finally {
           context.deactivate() // Very important to deactivate the context!
         }
-        val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
-        FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
+        val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
+        FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
       }
       .recover {
         case err =>
@@ -113,8 +111,8 @@ class StatelessFunctionImpl(_system: ActorSystem,
         } finally {
           context.deactivate() // Very important to deactivate the context!
         }
-        val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
-        FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
+        val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
+        FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
       }
     // deal with exception
   }
@@ -158,8 +156,8 @@ class StatelessFunctionImpl(_system: ActorSystem,
         } finally {
           context.deactivate() // Very important to deactivate the context!
         }
-        val scalaReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
-        FunctionReply(Response.Reply(Reply(scalaReply)), context.sideEffects)
+        val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
+        FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
       }
   }
 
