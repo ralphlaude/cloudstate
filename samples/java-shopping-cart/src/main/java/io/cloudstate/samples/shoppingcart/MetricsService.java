@@ -33,10 +33,10 @@ public class MetricsService {
   }
 
   @CommandHandler
-  public AverageResult streamedAverage(Metric metric, CommandContext ctx) {
-    logger.info("streamedAverage called count - " + count);
-    logger.info("streamedAverage called sum - " + sum);
-    logger.info("streamedAverage called metric - " + metric.getMetric());
+  public AverageResult streamAverage(Metric metric, CommandContext ctx) {
+    logger.info("StreamAverage called count - " + count);
+    logger.info("StreamAverage called sum - " + sum);
+    logger.info("StreamAverage called metric - " + metric.getMetric());
     count++;
     sum += metric.getMetric();
     return AverageResult.newBuilder().setValue(sum / count).build();
