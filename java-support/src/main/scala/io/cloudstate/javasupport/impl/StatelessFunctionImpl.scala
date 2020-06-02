@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.event.Logging
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
 import com.google.protobuf.any.{Any => ScalaPbAny}
@@ -51,8 +50,6 @@ class StatelessFunctionImpl(_system: ActorSystem,
                             rootContext: Context)(implicit mat: Materializer)
     extends StatelessFunction {
 
-  private[this] final val log = Logging.getLogger(_system, this.getClass)
-
   private final val system = _system
   private implicit val ec = _system.dispatcher
   private final val services = _services.iterator.toMap
@@ -62,7 +59,6 @@ class StatelessFunctionImpl(_system: ActorSystem,
 
   // FIXME FunctionCommand should have id?
   override def handleUnary(command: FunctionCommand): Future[FunctionReply] = {
-    log.info(s"handleUnary called command - $command")
     mayBeInit(command.serviceName)
 
     Future.unit
@@ -89,8 +85,7 @@ class StatelessFunctionImpl(_system: ActorSystem,
       }
   }
 
-  override def handleStreamedIn(commandSource: Source[FunctionCommand, NotUsed]): Future[FunctionReply] = {
-    log.info(s"handleStreamedIn called")
+  override def handleStreamedIn(commandSource: Source[FunctionCommand, NotUsed]): Future[FunctionReply] =
     commandSource
       .prefixAndTail(1)
       .flatMapConcat {
@@ -114,11 +109,9 @@ class StatelessFunctionImpl(_system: ActorSystem,
         val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
         FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
       }
-    // deal with exception
-  }
+  // deal with exception
 
   override def handleStreamedOut(command: FunctionCommand): Source[FunctionReply, NotUsed] = {
-    log.info(s"handleStreamedOut called")
     mayBeInit(command.serviceName)
     val context = new CommandContextImpl(command.name)
     val replies = try {
@@ -137,8 +130,7 @@ class StatelessFunctionImpl(_system: ActorSystem,
     }
   }
 
-  override def handleStreamed(commandSource: Source[FunctionCommand, NotUsed]): Source[FunctionReply, NotUsed] = {
-    log.info(s"handleStreamed called")
+  override def handleStreamed(commandSource: Source[FunctionCommand, NotUsed]): Source[FunctionReply, NotUsed] =
     commandSource
       .prefixAndTail(1)
       .flatMapConcat {
@@ -159,7 +151,6 @@ class StatelessFunctionImpl(_system: ActorSystem,
         val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
         FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
       }
-  }
 
   private def mayBeInit(serviceName: String): Unit =
     if (handlerInit.compareAndSet(false, true)) {
