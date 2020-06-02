@@ -1,0 +1,38 @@
+// This is the public API offered by the metrics service.
+syntax = "proto3";
+
+import "google/api/annotations.proto";
+import "google/api/http.proto";
+import "google/api/httpbody.proto";
+import "google/protobuf/timestamp.proto";
+
+package com.example.stateless.metricservice;
+
+option go_package = "tck/stateless/metricservice";
+
+
+message Metric {
+    google.protobuf.Timestamp timestamp = 1;
+    int64 metric = 2;
+}
+
+message AverageResult {
+    double value = 1;
+}
+
+service MetricService {
+
+    rpc Average(stream Metric) returns (AverageResult) {
+        option (google.api.http) = {
+            post: "/streamin/metrics/avg",
+            body: "*",
+        };
+    }
+
+    rpc StreamAverage(stream Metric) returns (stream AverageResult) {
+        option (google.api.http) = {
+            post: "/stream/metrics/avg",
+            body: "*",
+        };
+    }
+}
