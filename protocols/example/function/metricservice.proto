@@ -4,7 +4,6 @@ syntax = "proto3";
 import "google/api/annotations.proto";
 import "google/api/http.proto";
 import "google/api/httpbody.proto";
-import "google/protobuf/timestamp.proto";
 
 package com.example.stateless.metricservice;
 
@@ -12,26 +11,39 @@ option go_package = "tck/stateless/metricservice";
 
 
 message Metric {
-    google.protobuf.Timestamp timestamp = 1;
-    int64 metric = 2;
+    int64 value = 2;
 }
 
-message AverageResult {
+message Average {
     double value = 1;
 }
 
 service MetricService {
 
-    rpc Average(stream Metric) returns (AverageResult) {
+    rpc Collect(Metric) returns (Average) {
+        option (google.api.http) = {
+            post: "/metrics/avg",
+            body: "*",
+        };
+    }
+
+    rpc CollectStreamIn(stream Metric) returns (Average) {
         option (google.api.http) = {
             post: "/streamin/metrics/avg",
             body: "*",
         };
     }
 
-    rpc StreamAverage(stream Metric) returns (stream AverageResult) {
+    rpc CollectStreamOut(Metric) returns (stream Average) {
         option (google.api.http) = {
-            post: "/stream/metrics/avg",
+            post: "/streamout/metrics/avg",
+            body: "*",
+        };
+    }
+
+    rpc CollectStreamed(stream Metric) returns (stream Average) {
+        option (google.api.http) = {
+            post: "/streamed/metrics/avg",
             body: "*",
         };
     }
