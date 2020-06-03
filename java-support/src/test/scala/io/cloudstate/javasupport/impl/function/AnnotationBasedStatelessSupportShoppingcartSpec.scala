@@ -2,7 +2,7 @@ package io.cloudstate.javasupport.impl.function
 
 import java.util.Collections
 
-import com.example.stateless.metricservice.Metricservice
+import com.example.stateless.shoppingcart.Shoppingcart
 import com.google.protobuf.any.{Any => ScalaPbAny}
 import com.google.protobuf.{ByteString, Any => JavaPbAny}
 import io.cloudstate.javasupport._
@@ -10,7 +10,7 @@ import io.cloudstate.javasupport.function.{CommandContext, CommandHandler, State
 import io.cloudstate.javasupport.impl.{AnnotationBasedStatelessSupport, AnySupport, ResolvedServiceMethod, ResolvedType}
 import org.scalatest.{Matchers, WordSpec}
 
-class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
+class AnnotationBasedStatelessSupportSpec extends WordSpec with Matchers {
 
   trait BaseContext extends Context {
     override def serviceCallFactory(): ServiceCallFactory = new ServiceCallFactory {
@@ -22,21 +22,21 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
   object MockContext extends BaseContext
 
   class MockCommandContext extends CommandContext with BaseContext {
-    override def commandName(): String = "Collect"
+    override def commandName(): String = "AddItem"
     override def fail(errorMessage: String): RuntimeException = ???
     override def forward(to: ServiceCall): Unit = ???
     override def effect(effect: ServiceCall, synchronous: Boolean): Unit = ???
   }
 
   class StreamingInMockCommandContext extends CommandContext with BaseContext {
-    override def commandName(): String = "CollectStreamIn"
+    override def commandName(): String = "AddItemStreamIn"
     override def fail(errorMessage: String): RuntimeException = ???
     override def forward(to: ServiceCall): Unit = ???
     override def effect(effect: ServiceCall, synchronous: Boolean): Unit = ???
   }
 
   class StreamingOutMockCommandContext extends CommandContext with BaseContext {
-    override def commandName(): String = "CollectStreamOut"
+    override def commandName(): String = "AddItemStreamOut"
     override def fail(errorMessage: String): RuntimeException = ???
     override def forward(to: ServiceCall): Unit = ???
     override def effect(effect: ServiceCall, synchronous: Boolean): Unit = ???
@@ -57,21 +57,21 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
   }
 
   case class Wrapped(value: String)
-  val anySupport = new AnySupport(Array(Metricservice.getDescriptor), this.getClass.getClassLoader)
+  val anySupport = new AnySupport(Array(Shoppingcart.getDescriptor), this.getClass.getClassLoader)
   val method = ResolvedServiceMethod(
-    Metricservice.getDescriptor.findServiceByName("MetricService").findMethodByName("Collect"),
+    Shoppingcart.getDescriptor.findServiceByName("ShoppingCart").findMethodByName("AddItem"),
     StringResolvedType,
     WrappedResolvedType
   )
 
   val streamingInMethod = ResolvedServiceMethod(
-    Metricservice.getDescriptor.findServiceByName("MetricService").findMethodByName("CollectStreamIn"),
+    Shoppingcart.getDescriptor.findServiceByName("ShoppingCart").findMethodByName("AddItemStreamIn"),
     StringResolvedType,
     WrappedResolvedType
   )
 
   val streamingOutMethod = ResolvedServiceMethod(
-    Metricservice.getDescriptor.findServiceByName("MetricService").findMethodByName("CollectStreamOut"),
+    Shoppingcart.getDescriptor.findServiceByName("ShoppingCart").findMethodByName("AddItemStreamOut"),
     StringResolvedType,
     WrappedResolvedType
   )
@@ -110,7 +110,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "no arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def collect() = Wrapped("blah")
+          def addItem() = Wrapped("blah")
         }, method)
         decodeWrapped(handler.handleCommand(command("nothing"), new MockCommandContext).get) should ===(Wrapped("blah"))
       }
@@ -118,7 +118,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "single arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def collect(msg: String) = Wrapped(msg)
+          def addItem(msg: String) = Wrapped(msg)
         }, method)
         decodeWrapped(
           handler.handleCommand(command("blah"), new MockCommandContext).get
@@ -128,8 +128,8 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "multi arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def collect(msg: String, ctx: CommandContext) = {
-            ctx.commandName() should ===("Collect")
+          def addItem(msg: String, ctx: CommandContext) = {
+            ctx.commandName() should ===("AddItem")
             Wrapped(msg)
           }
         }, method)
@@ -140,7 +140,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "fail if there's a bad context type" in {
         a[RuntimeException] should be thrownBy create(new {
           @CommandHandler
-          def collect(msg: String, ctx: MockCommandContext) =
+          def addItem(msg: String, ctx: MockCommandContext) =
             Wrapped(msg)
         }, method)
       }
@@ -148,10 +148,10 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "fail if there's two command handlers for the same command" in {
         a[RuntimeException] should be thrownBy create(new {
           @CommandHandler
-          def collect(msg: String, ctx: CommandContext) =
+          def addItem(msg: String, ctx: CommandContext) =
             Wrapped(msg)
           @CommandHandler
-          def collect(msg: String) =
+          def addItem(msg: String) =
             Wrapped(msg)
         }, method)
       }
@@ -164,19 +164,10 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
         }, method)
       }
 
-      "fail if there's a Event Sourced command handler" in {
-        val ex = the[RuntimeException] thrownBy create(new {
-            @io.cloudstate.javasupport.eventsourced.CommandHandler
-            def collect(msg: String): Wrapped = Wrapped(msg)
-          }, streamingOutMethod)
-        ex.getMessage should include("Did you mean")
-        ex.getMessage should include(classOf[CommandHandler].getName)
-      }
-
       "fail if there's a CRDT command handler" in {
         val ex = the[RuntimeException] thrownBy create(new {
             @io.cloudstate.javasupport.crdt.CommandHandler
-            def collect(msg: String) =
+            def addItem(msg: String) =
               Wrapped(msg)
           }, method)
         ex.getMessage should include("Did you mean")
@@ -186,7 +177,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "unwrap exceptions" in {
         val handler = create(new {
           @CommandHandler
-          def collect(): Wrapped = throw new RuntimeException("foo")
+          def addItem(): Wrapped = throw new RuntimeException("foo")
         }, method)
         val ex = the[RuntimeException] thrownBy handler.handleCommand(command("nothing"), new MockCommandContext)
         ex.getMessage should ===("foo")
@@ -197,7 +188,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "no arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def collectStreamIn(): Wrapped = Wrapped("blah")
+          def addItemStreamIn(): Wrapped = Wrapped("blah")
         }, streamingInMethod)
         val ctx = new StreamingInMockCommandContext
         decodeWrapped(handler.handleStreamInCommand(Collections.singletonList(command("nothing")), ctx).get) should ===(
@@ -208,7 +199,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "single arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def collectStreamIn(msg: java.util.List[String]): Wrapped = Wrapped(msg.get(0))
+          def addItemStreamIn(msg: java.util.List[String]): Wrapped = Wrapped(msg.get(0))
         }, streamingInMethod)
         val ctx = new StreamingInMockCommandContext
         decodeWrapped(
@@ -220,8 +211,8 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
         val handler = create(
           new {
             @CommandHandler
-            def collectStreamIn(msg: java.util.List[String], ctx: CommandContext): Wrapped = {
-              ctx.commandName() should ===("CollectStreamIn")
+            def addItemStreamIn(msg: java.util.List[String], ctx: CommandContext): Wrapped = {
+              ctx.commandName() should ===("AddItemStreamIn")
               Wrapped(msg.get(0))
             }
           },
@@ -236,7 +227,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "fail if there's a bad context type" in {
         a[RuntimeException] should be thrownBy create(new {
           @CommandHandler
-          def collectStreamIn(msg: java.util.List[String], ctx: StreamingInMockCommandContext): Wrapped =
+          def addItemStreamIn(msg: java.util.List[String], ctx: StreamingInMockCommandContext): Wrapped =
             Wrapped(msg.get(0))
         }, streamingInMethod)
       }
@@ -245,10 +236,10 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
         a[RuntimeException] should be thrownBy create(
           new {
             @CommandHandler
-            def collectStreamIn(msg: String, ctx: CommandContext): Wrapped = Wrapped(msg)
+            def addItemStreamIn(msg: String, ctx: CommandContext): Wrapped = Wrapped(msg)
 
             @CommandHandler
-            def collectStreamIn(msg: String): Wrapped = Wrapped(msg)
+            def addItemStreamIn(msg: String): Wrapped = Wrapped(msg)
           },
           streamingInMethod
         )
@@ -261,19 +252,10 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
         }, streamingInMethod)
       }
 
-      "fail if there's a Event Sourced command handler" in {
-        val ex = the[RuntimeException] thrownBy create(new {
-            @io.cloudstate.javasupport.eventsourced.CommandHandler
-            def collectStreamIn(msg: String): Wrapped = Wrapped(msg)
-          }, streamingOutMethod)
-        ex.getMessage should include("Did you mean")
-        ex.getMessage should include(classOf[CommandHandler].getName)
-      }
-
       "fail if there's a CRDT command handler" in {
         val ex = the[RuntimeException] thrownBy create(new {
             @io.cloudstate.javasupport.crdt.CommandHandler
-            def collectStreamIn(msg: String): Wrapped = Wrapped(msg)
+            def addItemStreamIn(msg: String): Wrapped = Wrapped(msg)
           }, streamingInMethod)
         ex.getMessage should include("Did you mean")
         ex.getMessage should include(classOf[CommandHandler].getName)
@@ -282,7 +264,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "unwrap exceptions" in {
         val handler = create(new {
           @CommandHandler
-          def collectStreamIn(): Wrapped = throw new RuntimeException("foo")
+          def addItemStreamIn(): Wrapped = throw new RuntimeException("foo")
         }, streamingInMethod)
         val ctx = new StreamingInMockCommandContext
         val ex = the[RuntimeException] thrownBy handler.handleStreamInCommand(
@@ -297,7 +279,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "no arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def collectStreamOut(): Wrapped = Wrapped("blah")
+          def addItemStreamOut(): Wrapped = Wrapped("blah")
         }, streamingOutMethod)
         val ctx = new StreamingOutMockCommandContext
         decodeWrapped(handler.handleStreamOutCommand(command("nothing"), ctx).get(0)) should ===(
@@ -308,7 +290,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "single arg command handler" in {
         val handler = create(new {
           @CommandHandler
-          def collectStreamOut(msg: String): Wrapped = Wrapped(msg)
+          def addItemStreamOut(msg: String): Wrapped = Wrapped(msg)
         }, streamingOutMethod)
         val ctx = new StreamingOutMockCommandContext
         decodeWrapped(
@@ -320,8 +302,8 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
         val handler = create(
           new {
             @CommandHandler
-            def collectStreamOut(msg: String, ctx: CommandContext): Wrapped = {
-              ctx.commandName() should ===("CollectStreamOut")
+            def addItemStreamOut(msg: String, ctx: CommandContext): Wrapped = {
+              ctx.commandName() should ===("AddItemStreamOut")
               Wrapped(msg)
             }
           },
@@ -336,7 +318,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "fail if there's a bad context type" in {
         a[RuntimeException] should be thrownBy create(new {
           @CommandHandler
-          def collectStreamOut(msg: String, ctx: StreamingOutMockCommandContext): Wrapped = Wrapped(msg)
+          def addItemStreamOut(msg: String, ctx: StreamingOutMockCommandContext): Wrapped = Wrapped(msg)
         }, streamingOutMethod)
       }
 
@@ -344,10 +326,10 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
         a[RuntimeException] should be thrownBy create(
           new {
             @CommandHandler
-            def collectStreamOut(msg: String, ctx: CommandContext): Wrapped = Wrapped(msg)
+            def addItemStreamOut(msg: String, ctx: CommandContext): Wrapped = Wrapped(msg)
 
             @CommandHandler
-            def collectStreamOut(msg: String): Wrapped = Wrapped(msg)
+            def addItemStreamOut(msg: String): Wrapped = Wrapped(msg)
           },
           streamingOutMethod
         )
@@ -360,19 +342,10 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
         }, streamingOutMethod)
       }
 
-      "fail if there's a Event Sourced command handler" in {
-        val ex = the[RuntimeException] thrownBy create(new {
-            @io.cloudstate.javasupport.eventsourced.CommandHandler
-            def collectStreamOut(msg: String): Wrapped = Wrapped(msg)
-          }, streamingOutMethod)
-        ex.getMessage should include("Did you mean")
-        ex.getMessage should include(classOf[CommandHandler].getName)
-      }
-
       "fail if there's a CRDT command handler" in {
         val ex = the[RuntimeException] thrownBy create(new {
             @io.cloudstate.javasupport.crdt.CommandHandler
-            def collectStreamOut(msg: String): Wrapped = Wrapped(msg)
+            def addItemStreamOut(msg: String): Wrapped = Wrapped(msg)
           }, streamingOutMethod)
         ex.getMessage should include("Did you mean")
         ex.getMessage should include(classOf[CommandHandler].getName)
@@ -381,7 +354,7 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
       "unwrap exceptions" in {
         val handler = create(new {
           @CommandHandler
-          def collectStreamOut(): Wrapped = throw new RuntimeException("foo")
+          def addItemStreamOut(): Wrapped = throw new RuntimeException("foo")
         }, streamingOutMethod)
         val ctx = new StreamingOutMockCommandContext
         val ex = the[RuntimeException] thrownBy handler.handleStreamOutCommand(command("nothing"), ctx)
@@ -390,9 +363,3 @@ class AnnotationBasedStatelessSupportNewSpec extends WordSpec with Matchers {
     }
   }
 }
-
-@Stateless
-private class NoArgConstructorTest() {}
-
-@Stateless
-private class UnsupportedConstructorParameter(foo: String)
