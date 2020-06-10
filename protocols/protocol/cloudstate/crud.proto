@@ -62,16 +62,16 @@ message CrudEntityCommand {
     string entity_id = 1;
 
     // The ID of a sub entity.
-    //string sub_entity_id = 2;
+    string sub_entity_id = 2;
 
     // Command name
-    string name = 2;
+    string name = 3;
 
     // The command payload.
-    google.protobuf.Any payload = 3;
+    google.protobuf.Any payload = 4;
 
     // The command type.
-    CrudCommandType type = 4;
+    CrudCommandType type = 5;
 }
 
 // The command to be executed.

@@ -12,8 +12,14 @@ message LineItem {
     int32 quantity = 4;
 }
 
-// The shopping cart state.
+// The shopping cart state for a user.
 message Cart {
     repeated LineItem items = 1;
+}
+
+// The whole shopping cart state.
+message AllCart {
+    repeated Cart cartsList = 1;
+    map<string, Cart> cartsMap = 2;
 }
 

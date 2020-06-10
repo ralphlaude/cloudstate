@@ -207,7 +207,7 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
     val command = CrudCommand(
       serviceName = configuration.serviceName,
       entityId = entityId,
-      subEntityId = entityCommand.entityId,
+      subEntityId = entityCommand.subEntityId,
       id = idCounter,
       name = entityCommand.name,
       payload = entityCommand.payload,

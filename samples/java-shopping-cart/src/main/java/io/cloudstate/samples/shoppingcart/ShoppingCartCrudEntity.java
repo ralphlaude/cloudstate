@@ -17,6 +17,9 @@ import java.util.stream.Collectors;
 @CrudEntity
 public class ShoppingCartCrudEntity {
   private final String entityId;
+  private final Map<String, Shoppingcart.LineItem> userCart = new LinkedHashMap<>();
+  private final Map<String, Shoppingcart.Cart> cartNew = new LinkedHashMap<>();
+
   private final Map<String, Shoppingcart.LineItem> cart = new LinkedHashMap<>();
 
   public ShoppingCartCrudEntity(@EntityId String entityId) {
@@ -28,8 +31,16 @@ public class ShoppingCartCrudEntity {
     // HINTS: this is called by the proxy for updating the state
     this.cart.clear();
     for (Domain.LineItem item : cart.getItemsList()) {
-      this.cart.put(item.getProductId(), convert(item));
+      this.cart.put(item.getUserId(), convert(item));
     }
+  }
+
+  public void handleStateNew(Domain.AllCart carts) {
+    // HINTS: this is called by the proxy for updating the state
+    this.cartNew.clear();
+    carts.getCartsMapMap().entrySet().forEach(entry ->
+            this.cartNew.put(entry.getKey(), convert(entry.getValue()))
+    );
   }
 
   @CommandHandler
@@ -103,5 +114,11 @@ public class ShoppingCartCrudEntity {
     return Domain.Cart.newBuilder()
         .addAllItems(cart.values().stream().map(this::convert).collect(Collectors.toList()))
         .build();
+  }
+
+  private Shoppingcart.Cart convert(Domain.Cart cart) {
+    return Shoppingcart.Cart.newBuilder()
+            .addAllItems(cart.getItemsList().stream().map(this::convert).collect(Collectors.toList()))
+            .build();
   }
 }

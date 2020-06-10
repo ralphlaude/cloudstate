@@ -114,8 +114,10 @@ private class CrudSupport(eventSourcedEntity: ActorRef, parallelism: Int, privat
 
   override def handler(method: EntityMethodDescriptor): Flow[EntityCommand, UserFunctionReply, NotUsed] =
     Flow[EntityCommand].mapAsync(parallelism) { command =>
+      val subEntityId = method.extractCrudSubEntityId(command.payload.fold(ByteString.EMPTY)(_.value))
       val commandType = extractCommandType(method, command)
       val initCommand = CrudEntityCommand(entityId = command.entityId,
+                                          subEntityId = subEntityId,
                                           name = command.name,
                                           payload = command.payload,
                                           `type` = Some(commandType))
