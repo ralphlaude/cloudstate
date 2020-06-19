@@ -1,13 +1,15 @@
 package io.cloudstate.javasupport.impl
 
 import java.lang.reflect.{Constructor, InvocationTargetException}
-import java.util
 import java.util.Optional
+import java.util.{List => JavaList}
 
+import akka.NotUsed
 import com.google.protobuf.{Descriptors, Any => JavaPbAny}
 import io.cloudstate.javasupport.function._
 import io.cloudstate.javasupport.impl.ReflectionHelper.{InvocationContext, MainArgumentParameterHandler}
 import io.cloudstate.javasupport.{Context, ServiceCallFactory}
+import akka.stream.javadsl.{Source => JavaSource}
 
 /**
  * Annotation based implementation of the [[StatelessFactory]].
@@ -52,10 +54,10 @@ private[impl] class AnnotationBasedStatelessSupport(
       }
     }
 
-    override def handleStreamInCommand(commands: util.List[JavaPbAny], context: CommandContext): Optional[JavaPbAny] =
+    override def handleStreamedInCommand(commands: JavaList[JavaPbAny], context: CommandContext): Optional[JavaPbAny] =
       unwrap {
         behavior.commandHandlers.get(context.commandName()).map { handler =>
-          handler.invoke(entity, commands, context)
+          handler.invokeStreamedIn(entity, commands, context)
         } getOrElse {
           throw new RuntimeException(
             s"No command handler found for command [${context.commandName()}] on $behaviorsString"
@@ -63,10 +65,10 @@ private[impl] class AnnotationBasedStatelessSupport(
         }
       }
 
-    override def handleStreamOutCommand(command: JavaPbAny, context: CommandContext): util.List[JavaPbAny] =
+    override def handleStreamedOutCommand(command: JavaPbAny, context: CommandContext): JavaSource[JavaPbAny, NotUsed] =
       unwrap {
         behavior.commandHandlers.get(context.commandName()).map { handler =>
-          handler.invokeWithResults(entity, command, context)
+          handler.invokeStreamedOut(entity, command, context)
         } getOrElse {
           throw new RuntimeException(
             s"No command handler found for command [${context.commandName()}] on $behaviorsString"

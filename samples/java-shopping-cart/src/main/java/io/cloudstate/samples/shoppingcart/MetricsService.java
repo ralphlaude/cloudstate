@@ -1,5 +1,7 @@
 package io.cloudstate.samples.shoppingcart;
 
+import akka.NotUsed;
+import akka.stream.javadsl.Source;
 import com.example.stateless.metricservice.Metricservice.Average;
 import com.example.stateless.metricservice.Metricservice.Metric;
 import io.cloudstate.javasupport.function.CommandContext;
@@ -31,14 +33,15 @@ public class MetricsService {
   }
 
   @CommandHandler
-  public List<Average> collectStreamOut(Metric metric, CommandContext ctx) {
-    return Stream.iterate(1L, i -> i <= 100, i -> i + 1)
-        .map(
-            i -> {
-              long avg = (metric.getValue() + i) / i;
-              return Average.newBuilder().setValue(avg).build();
-            })
-        .collect(Collectors.toList());
+  public Source<Average, NotUsed> collectStreamOut(Metric metric, CommandContext ctx) {
+    return Source.from(
+        Stream.iterate(1L, i -> i <= 100, i -> i + 1)
+            .map(
+                i -> {
+                  long avg = (metric.getValue() + i) / i;
+                  return Average.newBuilder().setValue(avg).build();
+                })
+            .collect(Collectors.toList()));
   }
 
   @CommandHandler

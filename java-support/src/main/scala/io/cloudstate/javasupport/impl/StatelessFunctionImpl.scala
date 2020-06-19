@@ -17,17 +17,17 @@
 package io.cloudstate.javasupport.impl
 
 import java.util.Optional
-import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.Materializer
+import akka.stream.javadsl.{Source => JavaSource}
 import akka.stream.scaladsl.{Sink, Source}
 import com.google.protobuf.any.{Any => ScalaPbAny}
 import com.google.protobuf.{Descriptors, Any => JavaPbAny}
 import io.cloudstate.javasupport._
 import io.cloudstate.javasupport.function.{CommandContext, StatelessFactory, StatelessHandler}
-import io.cloudstate.protocol.entity.{Failure, Reply}
+import io.cloudstate.protocol.entity.{Failure, Forward, Reply}
 import io.cloudstate.protocol.function.FunctionReply.Response
 import io.cloudstate.protocol.function._
 
@@ -54,12 +54,35 @@ class StatelessFunctionImpl(_system: ActorSystem,
   private implicit val ec = _system.dispatcher
   private final val services = _services.iterator.toMap
 
-  private final val handlerInit = new AtomicBoolean(false)
-  private final var handler: StatelessHandler = _
+  /*
+   * Decision logs.
+   *
+   * For handleStreamedIn there are two options how to deal with the incoming Akka Source of commands.
+   * The first option is run the Akka Source and pass those commands to the User function.
+   * The second option is to pass the Akka Source to the User Function and it runs it. I found this very cumbersome
+   * on the one hand for the usability because the User Function needs to know how to execute Akka Streams.
+   * On the other hand for executing Akka Streams Akka Materializer should be passed around in the CommandContext,
+   * this way the proxy is somehow exposed to the User Function.
+   * I take the second option this the proxy does the heavy lifting for the Akka Streams and provides the User Function
+   * with the right inputs.
+   *
+   * For all this the io.cloudstate.javasupport.impl.ReflectionHelper was extended to deal with types like
+   * java.util.List (method handleStreamedIn) and akka.stream.javadsl.Source (method handleStreamedOut)
+   * which are the input and output type of a Stateless User Function. Some invokeXXX methods are added to deal with that.
+   *
+   *
+   * Command Id is still missing in FunctionCommand. This lead to the fact that it is not possible right now
+   * to create a FunctionReply.Response.Failure. FunctionReply.Response.Failure needs a command id.
+   * The proxy cannot map a Failure to originating FunctionCommand. This is already known as problem.
+   * The more general question is how the proxy should generate command id for Stateless FunctionCommand.
+   * I see a transient and persistent way for creating command id. The transient way can use an in memory randomizer
+   * for that. The persistent way can use an Event Sourced Entity to deal with.
+   *
+   *
+   */
 
-  // FIXME FunctionCommand should have id?
   override def handleUnary(command: FunctionCommand): Future[FunctionReply] = {
-    mayBeInit(command.serviceName)
+    val handler = createHandler(command)
 
     Future.unit
       .map { _ =>
@@ -72,73 +95,55 @@ class StatelessFunctionImpl(_system: ActorSystem,
         } finally {
           context.deactivate() // Very important to deactivate the context!
         }
-        val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
-        FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
-      }
-      .recover {
-        case err =>
-          system.log.error(
-            err,
-            s"Unexpected error during the invocation of the unary call ${command.name} for the service ${command.serviceName}."
-          )
-          FunctionReply(Response.Failure(Failure(description = err.getMessage)))
+        val response = context.createClientAction(reply)
+        FunctionReply(response, context.sideEffects)
       }
   }
 
   override def handleStreamedIn(commandSource: Source[FunctionCommand, NotUsed]): Future[FunctionReply] =
     commandSource
-      .prefixAndTail(1)
-      .flatMapConcat {
-        case (firstCommands, source) =>
-          mayBeInit(firstCommands.head.serviceName)
-          Source(firstCommands).concat(source)
-      }
       .runWith(Sink.seq)
       .map { commands =>
         import scala.collection.JavaConverters._
+        val handler = createHandler(commands.head)
         val javaAnyCommands = commands.map(command => ScalaPbAny.toJavaProto(command.payload.get))
         val context = new CommandContextImpl(commands.head.name)
         val reply = try {
-          handler.handleStreamInCommand(javaAnyCommands.asJava, context)
+          handler.handleStreamedInCommand(javaAnyCommands.asJava, context)
         } catch {
           // context.fail(...) was called
-          case FailInvoked => Optional.empty[JavaPbAny]()
+          case FailInvoked => Optional.empty[JavaPbAny]
         } finally {
           context.deactivate() // Very important to deactivate the context!
         }
-        val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
-        FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
+
+        val clientAction = context.createClientAction(reply)
+        FunctionReply(clientAction, context.sideEffects)
       }
-  // deal with exception
 
   override def handleStreamedOut(command: FunctionCommand): Source[FunctionReply, NotUsed] = {
-    mayBeInit(command.serviceName)
+    val handler = createHandler(command)
     val context = new CommandContextImpl(command.name)
     val replies = try {
-      handler.handleStreamOutCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
+      handler.handleStreamedOutCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
     } catch {
       // context.fail(...) was called
-      case FailInvoked => java.util.List.of[JavaPbAny]()
+      case FailInvoked => JavaSource.empty[JavaPbAny]()
     } finally {
       context.deactivate() // Very important to deactivate the context!
     }
-    Source.fromIterator { () =>
-      import scala.collection.JavaConverters._
-      replies.asScala
-        .map(r => FunctionReply(Response.Reply(Reply(Some(ScalaPbAny.fromJavaProto(r)))), context.sideEffects))
-        .iterator
-    }
+
+    replies.asScala
+      .map { r =>
+        val clientAction = context.createClientAction(Optional.of(r))
+        FunctionReply(clientAction, context.sideEffects)
+      }
   }
 
   override def handleStreamed(commandSource: Source[FunctionCommand, NotUsed]): Source[FunctionReply, NotUsed] =
     commandSource
-      .prefixAndTail(1)
-      .flatMapConcat {
-        case (firstCommands, source) =>
-          mayBeInit(firstCommands.head.serviceName)
-          Source(firstCommands).concat(source)
-      }
       .map { command =>
+        val handler = createHandler(command)
         val context = new CommandContextImpl(command.name)
         val reply = try {
           handler.handleCommand(ScalaPbAny.toJavaProto(command.payload.get), context)
@@ -148,15 +153,20 @@ class StatelessFunctionImpl(_system: ActorSystem,
         } finally {
           context.deactivate() // Very important to deactivate the context!
         }
-        val ufReply = if (reply.isEmpty) None else Some(ScalaPbAny.fromJavaProto(reply.get()))
-        FunctionReply(Response.Reply(Reply(ufReply)), context.sideEffects)
+        val clientAction = context.createClientAction(reply)
+        FunctionReply(clientAction, context.sideEffects)
       }
 
-  private def mayBeInit(serviceName: String): Unit =
-    if (handlerInit.compareAndSet(false, true)) {
-      val service = services.getOrElse(serviceName, throw new RuntimeException(s"Service not found: $serviceName"))
-      handler = service.factory.create(StatelessContextImpl)
-    }
+  private def createHandler(command: FunctionCommand): StatelessHandler = {
+    val service =
+      services.getOrElse(command.serviceName, throw new RuntimeException(s"Service not found: ${command.serviceName}"))
+    // fail fast by checking if there a method for the service with command.name
+    service.resolvedMethods.getOrElse(
+      command.name,
+      throw new RuntimeException(s"Service call not found: ${command.serviceName}.${command.name}")
+    )
+    service.factory.create(StatelessContextImpl)
+  }
 
   trait AbstractContext extends Context {
     override def serviceCallFactory(): ServiceCallFactory = rootContext.serviceCallFactory()
@@ -167,10 +177,61 @@ class StatelessFunctionImpl(_system: ActorSystem,
   class CommandContextImpl(override val commandName: String)
       extends CommandContext
       with AbstractContext
-      with AbstractClientActionContext
+      with StatelessClientActionContext
       with AbstractEffectContext
       with ActivatableContext {
     override def commandId: Long =
-      Long.MinValue // FIXME how to deal with commandId? Do we need the commandId for the CommandContextImpl?
+      Long.MinValue // FIXME need for response failure. how to deal with commandId? Do we need the commandId for the CommandContextImpl?
+  }
+
+  trait StatelessClientActionContext extends ClientActionContext {
+    self: ActivatableContext =>
+
+    private final var error: Option[String] = None
+    private final var forward: Option[Forward] = None
+
+    def commandId: Long
+
+    override final def fail(errorMessage: String): RuntimeException = {
+      checkActive()
+      if (error.isEmpty) {
+        error = Some(errorMessage)
+        throw FailInvoked
+      } else throw new IllegalStateException("fail(…) already previously invoked!")
+    }
+
+    override final def forward(to: ServiceCall): Unit = {
+      checkActive()
+      if (forward.isDefined) {
+        throw new IllegalStateException("This context has already forwarded.")
+      }
+      forward = Some(
+        Forward(
+          serviceName = to.ref().method().getService.getFullName,
+          commandName = to.ref().method().getName,
+          payload = Some(ScalaPbAny.fromJavaProto(to.message()))
+        )
+      )
+    }
+
+    final def hasError: Boolean = error.isDefined
+
+    final def createClientAction(reply: Optional[JavaPbAny]): FunctionReply.Response =
+      error match {
+        case Some(msg) => Response.Failure(Failure(commandId, msg))
+        case None =>
+          if (reply.isPresent) {
+            if (forward.isDefined) {
+              throw new IllegalStateException(
+                "Both a reply was returned, and a forward message was sent, choose one or the other."
+              )
+            }
+            Response.Reply(Reply(Some(ScalaPbAny.fromJavaProto(reply.get()))))
+          } else if (forward.isDefined) {
+            Response.Forward(forward.get)
+          } else {
+            throw new RuntimeException("No reply or forward returned by command handler!")
+          }
+      }
   }
 }

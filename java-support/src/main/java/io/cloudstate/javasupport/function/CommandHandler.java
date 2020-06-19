@@ -1,6 +1,5 @@
 package io.cloudstate.javasupport.function;
 
-import io.cloudstate.javasupport.eventsourced.CommandContext;
 import io.cloudstate.javasupport.impl.CloudStateAnnotation;
 
 import java.lang.annotation.ElementType;
@@ -19,8 +18,7 @@ import java.lang.annotation.Target;
  *
  * <p>The return type of the method must match the gRPC services output type.
  *
- * <p>The method may also take a {@link CommandContext}, and/or a {@link
- * io.cloudstate.javasupport.EntityId} annotated {@link String} parameter.
+ * <p>The method may also take a {@link CommandContext}.
  */
 @CloudStateAnnotation
 @Target(ElementType.METHOD)

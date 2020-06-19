@@ -2,9 +2,11 @@ package io.cloudstate.javasupport.impl
 
 import java.lang.annotation.Annotation
 import java.lang.reflect.{AccessibleObject, Executable, Member, Method, ParameterizedType, Type, WildcardType}
-import java.util
 import java.util.Optional
+import java.util.{List => JavaList}
 
+import akka.NotUsed
+import akka.stream.javadsl.{Source => JavaSource}
 import io.cloudstate.javasupport.{Context, EntityContext, EntityId, ServiceCallFactory}
 import com.google.protobuf.{Any => JavaPbAny}
 
@@ -109,7 +111,8 @@ private[impl] object ReflectionHelper {
     }
     parameters.foreach {
       case MainArgumentParameterHandler(inClass)
-          if !(inClass.isAssignableFrom(serviceMethod.inputType.typeClass) || classOf[util.List[_]]
+          if !(inClass.isAssignableFrom(serviceMethod.inputType.typeClass) || classOf[JavaList[_]]
+            .isAssignableFrom(inClass) || classOf[JavaSource[_, _]]
             .isAssignableFrom(inClass)) =>
         throw new RuntimeException(
           s"Incompatible command class $inClass for command $name, expected ${serviceMethod.inputType.typeClass}"
@@ -126,7 +129,7 @@ private[impl] object ReflectionHelper {
 
     private def verifyOutputType(t: Type): Unit = {
       val rawType = getRawType(t)
-      if (!(serviceMethod.outputType.typeClass.isAssignableFrom(rawType) || classOf[util.List[_]]
+      if (!(serviceMethod.outputType.typeClass.isAssignableFrom(rawType) || classOf[JavaSource[_, _]]
             .isAssignableFrom(rawType))) {
         throw new RuntimeException(
           s"Incompatible return class $t for command $name, expected ${serviceMethod.outputType.typeClass}"
@@ -152,24 +155,15 @@ private[impl] object ReflectionHelper {
       result => Optional.of(serialize(result))
     }
 
-    private val handleResults: AnyRef => util.List[JavaPbAny] = {
+    private val handleStreamOutResult: AnyRef => JavaSource[JavaPbAny, NotUsed] = {
       if (method.getReturnType == Void.TYPE) { _ =>
-        util.Collections.emptyList()
-      } else if (method.getReturnType == classOf[util.List[_]]) {
+        JavaSource.empty[JavaPbAny]()
+      } else if (method.getReturnType == classOf[JavaSource[_, NotUsed]]) {
         verifyOutputType(getFirstParameter(method.getGenericReturnType))
-
-        result => {
-          import scala.collection.JavaConverters._
-          val asList = result.asInstanceOf[util.List[AnyRef]]
-          if (!asList.isEmpty) {
-            asList.asScala.map(serialize).asJava
-          } else {
-            util.Collections.emptyList()
-          }
-        }
+        result => result.asInstanceOf[JavaSource[AnyRef, NotUsed]].map(serialize)
       } else {
         verifyOutputType(method.getReturnType)
-        result => util.Collections.singletonList(serialize(result))
+        result => JavaSource.single[JavaPbAny](serialize(result))
       }
     }
 
@@ -180,7 +174,7 @@ private[impl] object ReflectionHelper {
       handleResult(result)
     }
 
-    def invoke(obj: AnyRef, commands: util.List[JavaPbAny], context: CommandContext): Optional[JavaPbAny] = {
+    def invokeStreamedIn(obj: AnyRef, commands: JavaList[JavaPbAny], context: CommandContext): Optional[JavaPbAny] = {
       import scala.collection.JavaConverters._
       val decodedCommands =
         commands.asScala.map(command => serviceMethod.inputType.parseFrom(command.getValue).asInstanceOf[AnyRef]).asJava
@@ -189,12 +183,11 @@ private[impl] object ReflectionHelper {
       handleResult(result)
     }
 
-    //FIXME better name
-    def invokeWithResults(obj: AnyRef, command: JavaPbAny, context: CommandContext): util.List[JavaPbAny] = {
+    def invokeStreamedOut(obj: AnyRef, command: JavaPbAny, context: CommandContext): JavaSource[JavaPbAny, NotUsed] = {
       val decodedCommand = serviceMethod.inputType.parseFrom(command.getValue).asInstanceOf[AnyRef]
       val ctx = InvocationContext(decodedCommand, context)
       val result = method.invoke(obj, parameters.map(_.apply(ctx)): _*)
-      handleResults(result)
+      handleStreamOutResult(result)
     }
   }
 
@@ -230,7 +223,7 @@ private[impl] object ReflectionHelper {
           throw new RuntimeException(
             s"Annotation @${annotation.annotationType().getName} on method ${method.getDeclaringClass.getName}." +
             s"${method.getName} not allowed in @${entity.getName} annotated entity." +
-            maybeAlternative.fold("")(alterative => s" Did you mean to use @${alterative.getName}?")
+            maybeAlternative.fold("")(alternative => s" Did you mean to use @${alternative.getName}?")
           )
         }
       }
