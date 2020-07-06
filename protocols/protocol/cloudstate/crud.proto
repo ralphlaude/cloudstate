@@ -1,0 +1,106 @@
+// Copyright 2019 Lightbend Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// gRPC interface for common messages and services for CRUD Entity user functions.
+
+syntax = "proto3";
+
+package cloudstate.crud;
+
+// Any is used so that domain events defined according to the functions business domain can be embedded inside
+// the protocol.
+import "google/protobuf/any.proto";
+import "cloudstate/entity.proto";
+
+option java_package = "io.cloudstate.protocol";
+option go_package = "cloudstate/protocol";
+
+service Crud {
+  // A streamed connection for handling commands to a particular entity.
+  rpc handle(stream CrudStreamIn) returns (stream CrudStreamOut) {}
+}
+
+message CrudStreamIn {
+  oneof message {
+    CrudInit init = 1;
+    Command command = 2;
+  }
+}
+
+// When an CRUD entity is first activated, it will receive this message first
+// before any commands are sent, this will tell it the service it's for and
+// the id of the entity it's for, and if the value for the entity already
+// exists, it will contain that as well.
+message CrudInit {
+  // The name of the service that implements this CRUD entity
+  string service_name = 1;
+  // The id of the entity
+  string entity_id = 2;
+  // The value of the entity, if the entity has already been created.
+  google.protobuf.Any value = 3;
+  // Indicate the state of the CRUD entity which is sent to the user function to replace its current state.
+  CrudState state = 4;
+}
+
+// Represents the full state of an CRUD entity. It is sent to the user function so that it replaces
+// the current state.
+message CrudState {
+  oneof state {
+    CrudUpdateState updated = 1;
+    CrudDeleteState deleted = 2;
+  }
+}
+
+// Represents the state of an created and updated CRUD entity
+message CrudUpdateState {
+  // The value to set.
+  google.protobuf.Any value = 1;
+}
+
+// Represents the state of an deleted CRUD entity
+message CrudDeleteState {}
+
+message CrudStreamOut {
+  oneof message {
+    CrudReply reply = 1;
+    Failure failure = 2;
+  }
+}
+
+message CrudReply {
+  // The command being replied to
+  int64 command_id = 1;
+  // The action to take for the client response
+  ClientAction client_action = 2;
+  // Any side effects to perform
+  repeated SideEffect side_effects = 3;
+  // The action to take on the CRUD entity
+  CrudAction crud_action = 4;
+}
+
+message CrudAction {
+  oneof action {
+    CrudUpdate update = 1;
+    CrudDelete delete = 2;
+  }
+}
+
+// Update the persisted value of the CRUD entity. If the entity is not yet persisted, it will be created.
+message CrudUpdate {
+  // The value to set.
+  google.protobuf.Any value = 1;
+}
+
+// Delete the persisted value of the CRUD entity
+message CrudDelete {}
