@@ -23,7 +23,7 @@ import io.cloudstate.javasupport.EffectContext;
  * An CRUD command context.
  *
  * <p>Methods annotated with {@link CommandHandler} may take this is a parameter.
- * It allows updating or deleting the persistent entity state in response to a command, along with
+ * It allows updating or deleting the entity state in response to a command, along with
  * forwarding the result to other entities, and performing side effects on other entities.
  */
 public interface CommandContext extends CrudContext, ClientActionContext, EffectContext {
