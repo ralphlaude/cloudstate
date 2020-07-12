@@ -16,7 +16,12 @@
 
 package io.cloudstate.javasupport.crud;
 
-/** A snapshot context. */
+/** A state context. */
 public interface StateContext extends CrudContext {
-  // may be we need the state here
+  /**
+   * The sequence number of this state.
+   *
+   * @return The sequence number.
+   */
+  long sequenceNumber();
 }

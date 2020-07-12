@@ -18,13 +18,17 @@ package io.cloudstate.javasupport;
 
 import com.typesafe.config.Config;
 import com.google.protobuf.Descriptors;
+import io.cloudstate.javasupport.crud.CrudEntity;
 import io.cloudstate.javasupport.crdt.CrdtEntity;
 import io.cloudstate.javasupport.crdt.CrdtEntityFactory;
+import io.cloudstate.javasupport.crud.CrudEntityFactory;
 import io.cloudstate.javasupport.eventsourced.EventSourcedEntity;
 import io.cloudstate.javasupport.eventsourced.EventSourcedEntityFactory;
 import io.cloudstate.javasupport.impl.AnySupport;
 import io.cloudstate.javasupport.impl.crdt.AnnotationBasedCrdtSupport;
 import io.cloudstate.javasupport.impl.crdt.CrdtStatefulService;
+import io.cloudstate.javasupport.impl.crud.AnnotationBasedCrudSupport;
+import io.cloudstate.javasupport.impl.crud.CrudStatefulService;
 import io.cloudstate.javasupport.impl.eventsourced.AnnotationBasedEventSourcedSupport;
 import io.cloudstate.javasupport.impl.eventsourced.EventSourcedStatefulService;
 
@@ -137,7 +141,7 @@ public final class CloudState {
   }
 
   /**
-   * Register an event sourced entity factor.
+   * Register an event sourced entity factory.
    *
    * <p>This is a low level API intended for custom (eg, non reflection based) mechanisms for
    * implementing the entity.
@@ -205,7 +209,7 @@ public final class CloudState {
   }
 
   /**
-   * Register an CRDt entity factory.
+   * Register an CRDT entity factory.
    *
    * <p>This is a low level API intended for custom (eg, non reflection based) mechanisms for
    * implementing the entity.
@@ -223,6 +227,86 @@ public final class CloudState {
     services.put(
         descriptor.getFullName(),
         new CrdtStatefulService(factory, descriptor, newAnySupport(additionalDescriptors)));
+
+    return this;
+  }
+
+  /**
+   * Register an annotated CRUD entity.
+   *
+   * <p>The entity class must be annotated with {@link io.cloudstate.javasupport.crud.CrudEntity}.
+   *
+   * @param entityClass The entity class.
+   * @param descriptor The descriptor for the service that this entity implements.
+   * @param additionalDescriptors Any additional descriptors that should be used to look up protobuf
+   *     types when needed.
+   * @return This stateful service builder.
+   */
+  public CloudState registerCrudEntity(
+      Class<?> entityClass,
+      Descriptors.ServiceDescriptor descriptor,
+      Descriptors.FileDescriptor... additionalDescriptors) {
+
+    CrudEntity entity = entityClass.getAnnotation(CrudEntity.class);
+    if (entity == null) {
+      throw new IllegalArgumentException(
+          entityClass + " does not declare an " + CrudEntity.class + " annotation!");
+    }
+
+    final String persistenceId;
+    final int snapshotEvery;
+    if (entity.persistenceId().isEmpty()) {
+      persistenceId = entityClass.getSimpleName();
+      snapshotEvery = 0; // Default
+    } else {
+      persistenceId = entity.persistenceId();
+      snapshotEvery = entity.snapshotEvery();
+    }
+
+    final AnySupport anySupport = newAnySupport(additionalDescriptors);
+
+    services.put(
+        descriptor.getFullName(),
+        new CrudStatefulService(
+            new AnnotationBasedCrudSupport(entityClass, anySupport, descriptor),
+            descriptor,
+            anySupport,
+            persistenceId,
+            snapshotEvery));
+
+    return this;
+  }
+
+  /**
+   * Register an CRUD entity factory.
+   *
+   * <p>This is a low level API intended for custom (eg, non reflection based) mechanisms for
+   * implementing the entity.
+   *
+   * @param factory The CRUD factory.
+   * @param descriptor The descriptor for the service that this entity implements.
+   * @param persistenceId The persistence id for this entity.
+   * @param snapshotEvery Specifies how snapshots of the entity state should be made: Zero means use
+   *     default from configuration file. (Default) Any negative value means never snapshot. Any
+   *     positive value means snapshot at-or-after that number of events.
+   * @param additionalDescriptors Any additional descriptors that should be used to look up protobuf
+   *     types when needed.
+   * @return This stateful service builder.
+   */
+  public CloudState registerCrudEntity(
+      CrudEntityFactory factory,
+      Descriptors.ServiceDescriptor descriptor,
+      String persistenceId,
+      int snapshotEvery,
+      Descriptors.FileDescriptor... additionalDescriptors) {
+    services.put(
+        descriptor.getFullName(),
+        new CrudStatefulService(
+            factory,
+            descriptor,
+            newAnySupport(additionalDescriptors),
+            persistenceId,
+            snapshotEvery));
 
     return this;
   }

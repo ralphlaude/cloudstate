@@ -29,22 +29,20 @@ import akka.util.Timeout
 import com.google.protobuf.any.{Any => pbAny}
 import io.cloudstate.protocol.crud.CrudAction.Action.{Delete, Update}
 import io.cloudstate.protocol.crud.{
-  CrudAction,
   CrudClient,
   CrudInit,
+  CrudInitState,
   CrudReply,
+  CrudSnapshot,
   CrudStreamIn,
   CrudStreamOut,
   CrudUpdate
 }
 import io.cloudstate.protocol.entity._
-import io.cloudstate.protocol.event_sourced._
 import io.cloudstate.proxy.ConcurrencyEnforcer.{Action, ActionCompleted}
 import io.cloudstate.proxy.StatsCollector
-import io.cloudstate.proxy.crud.CrudEntity.{CrudState, Deleted, Updated}
 import io.cloudstate.proxy.entity.{EntityCommand, UserFunctionReply}
 
-import scala.collection.immutable
 import scala.collection.immutable.Queue
 
 object CrudEntitySupervisor {
@@ -137,13 +135,6 @@ object CrudEntity {
       replyTo: ActorRef
   )
 
-  // TODO: how to save the current state to know if the entity is deleted and to synchronize it between the UF and the Entity?
-  // TODO: on option would be to to keep track of the last state by updating it on recover on every state changes.
-  // TODO: another option?
-  private trait CrudState
-  private case class Updated(value: pbAny) extends CrudState
-  private case object Deleted extends CrudState
-
   final def props(configuration: Configuration,
                   entityId: String,
                   relay: ActorRef,
@@ -169,7 +160,7 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
 
   private val actorId = CrudEntity.actorCounter.incrementAndGet()
 
-  private[this] final var currentState: Option[CrudState] = None
+  private[this] final var recoveredState: Option[pbAny] = None
   private[this] final var stashedCommands = Queue.empty[(EntityCommand, ActorRef)] // PERFORMANCE: look at options for data structures
   private[this] final var currentCommand: CrudEntity.OutstandingCommand = null
   private[this] final var stopped = false
@@ -228,13 +219,6 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
     concurrencyEnforcer ! ActionCompleted(currentCommand.actionId, System.nanoTime() - commandStartTime)
 
   private[this] final def handleCommand(entityCommand: EntityCommand, sender: ActorRef): Unit = {
-    // TODO: may be this should be change?
-    if (isDeleted()) {
-      // create failure for commands accessing deleted CRUD entity.
-      sender ! createFailure(
-        s"Unexpected request on a deleted CRUD entity - $entityId with command - ${entityCommand.name}"
-      )
-    }
     idCounter += 1
     val command = Command(
       entityId = entityId,
@@ -248,15 +232,6 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
       relay ! CrudStreamIn(CrudStreamIn.Message.Command(command))
     })
   }
-
-  private[this] final def isDeleted(): Boolean =
-    currentState.fold(false)(
-      s =>
-        s match {
-          case Deleted => true
-          case Updated(_) => false
-        }
-    )
 
   private final def esReplyToUfReply(reply: CrudReply) =
     UserFunctionReply(
@@ -290,19 +265,24 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
         case CrudSOMsg.Reply(r) =>
           reportActionComplete()
           val commandId = currentCommand.commandId
+          if (r.crudAction.isEmpty) {
+            currentCommand.replyTo ! esReplyToUfReply(r)
+            commandHandled()
+          } else {
+            reportDatabaseOperationStarted()
+            r.crudAction map { a =>
+              // map the CrudAction to state
+              val state = a.action match {
+                case Update(CrudUpdate(Some(value), _)) => Some(value)
+                case Delete(_) => None
+              }
 
-          r.crudAction map { a =>
-            val event = a.action match {
-              case Update(CrudUpdate(Some(value), _)) => Some(Updated(value))
-              case Delete(_) => Some(Deleted)
-              case _ => None
-            }
-            // TODO: may be synchronize the current state here?
-
-            event.map { e =>
-              reportDatabaseOperationStarted()
-              persist(e) { _ =>
+              persist(state) { _ =>
                 reportDatabaseOperationFinished()
+                // try to save a snapshot
+                r.snapshot.foreach {
+                  case CrudSnapshot(value, _) => saveSnapshot(value)
+                }
                 // Make sure that the current request is still ours
                 if (currentCommand == null || currentCommand.commandId != commandId) {
                   crash("Internal error - currentRequest changed before all events were persisted")
@@ -334,18 +314,18 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
       }
 
     case CrudEntity.StreamClosed =>
-      notifyOutstandingRequests("Unexpected entity termination")
+      notifyOutstandingRequests("Unexpected CRUD entity termination")
       context.stop(self)
 
     case Status.Failure(error) =>
-      notifyOutstandingRequests("Unexpected entity termination")
+      notifyOutstandingRequests("Unexpected CRUD entity termination")
       throw error
 
     case SaveSnapshotSuccess(metadata) =>
     // Nothing to do
 
     case SaveSnapshotFailure(metadata, cause) =>
-      log.error("Error saving snapshot", cause)
+      log.error("Error saving snapshot for CRUD entity", cause)
 
     case ReceiveTimeout =>
       context.parent ! ShardRegion.Passivate(stopMessage = CrudEntity.Stop)
@@ -357,46 +337,15 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
       }
   }
 
-  private[this] final def maybeInit(snapshot: Option[SnapshotOffer]): Unit =
-    if (!inited) {
-      relay ! EventSourcedStreamIn(
-        EventSourcedStreamIn.Message.Init(
-          EventSourcedInit(
-            serviceName = configuration.serviceName,
-            entityId = entityId,
-            snapshot = snapshot.map {
-              case SnapshotOffer(metadata, offeredSnapshot: pbAny) =>
-                EventSourcedSnapshot(metadata.sequenceNr, Some(offeredSnapshot))
-              case other => throw new IllegalStateException(s"Unexpected snapshot type received: ${other.getClass}")
-            }
-          )
-        )
-      )
-      inited = true
-    }
-
-  override final def receiveRecover: PartialFunction[Any, Unit] = {
-    case offer: SnapshotOffer =>
-      maybeInit(Some(offer))
-
-    case RecoveryCompleted =>
-      reportDatabaseOperationFinished()
-      maybeInit(None)
-
-    case event: pbAny =>
-      maybeInit(None)
-      relay ! EventSourcedStreamIn(EventSourcedStreamIn.Message.Event(EventSourcedEvent(lastSequenceNr, Some(event))))
-  }
+  override final def receiveRecover: PartialFunction[Any, Unit] = handleRecover
 
   private[this] final def handleRecover: PartialFunction[Any, Unit] = {
     case offer: SnapshotOffer =>
       if (!inited) {
-        // apply snapshot on currentState only when the entity is not fully initialized
-        currentState = offer.snapshot match {
-          case updated: Updated => Some(updated)
-          case Deleted => Some(Deleted)
+        // apply snapshot on recoveredState only when the entity is not fully initialized
+        recoveredState = offer.snapshot match {
+          case Some(updated: pbAny) => Some(updated)
           case other =>
-            // TODO may be use Failure here?
             throw new IllegalStateException(s"CRUD entity received a unexpected snapshot type : ${other.getClass}")
         }
       }
@@ -409,22 +358,19 @@ final class CrudEntity(configuration: CrudEntity.Configuration,
             CrudInit(
               serviceName = configuration.serviceName,
               entityId = entityId,
-              value = currentState.flatMap {
-                case Updated(value: pbAny) => Some(value)
-                case Deleted => None
-              }
+              state = Some(CrudInitState(recoveredState, lastSequenceNr))
             )
           )
         )
         inited = true
       }
 
-    case event: CrudState =>
+    case event: Any =>
       if (!inited) {
-        // apply event on currentState only when the entity is not fully initialized
-        currentState = event match {
-          case updated: Updated => Some(updated)
-          case Deleted => Some(Deleted)
+        // apply event on recoveredState only when the entity is not fully initialized
+        recoveredState = event match {
+          case Some(updated: pbAny) => Some(updated)
+          case _ => None
         }
       }
   }

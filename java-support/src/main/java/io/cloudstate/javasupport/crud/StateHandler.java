@@ -24,17 +24,17 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks a method as a snapshot handler.
+ * Marks a method as a state handler.
  *
- * <p>If, when recovering an entity, that entity has a snapshot, the snapshot will be passed to a
- * corresponding snapshot handler method whose argument matches its type. The entity must set its
- * current state to that snapshot.
+ * <p>If, when recovering an entity, that entity has a state, the state will be passed to a
+ * corresponding state handler method whose argument matches its type. The entity must set its
+ * current state to that state.
  *
- * <p>An entity may declare more than one snapshot handler if it wants different handling for
- * different types.
+ * <p>An entity may declare more than one state handler if it wants different handling for different
+ * types.
  *
- * <p>The snapshot handler method may additionally accept a {@link StateContext} parameter, allowing
- * it to access context for the snapshot, if required.
+ * <p>The state handler method may additionally accept a {@link StateContext} parameter, allowing it
+ * to access context for the state, if required.
  */
 @CloudStateAnnotation
 @Target(ElementType.METHOD)

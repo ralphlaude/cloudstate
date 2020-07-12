@@ -28,7 +28,9 @@ import com.google.protobuf.Descriptors
 import io.cloudstate.javasupport.impl.eventsourced.{EventSourcedImpl, EventSourcedStatefulService}
 import io.cloudstate.javasupport.impl.{EntityDiscoveryImpl, ResolvedServiceCallFactory, ResolvedServiceMethod}
 import io.cloudstate.javasupport.impl.crdt.{CrdtImpl, CrdtStatefulService}
+import io.cloudstate.javasupport.impl.crud.{CrudImpl, CrudStatefulService}
 import io.cloudstate.protocol.crdt.CrdtHandler
+import io.cloudstate.protocol.crud.CrudHandler
 import io.cloudstate.protocol.entity.EntityDiscoveryHandler
 import io.cloudstate.protocol.event_sourced.EventSourcedHandler
 
@@ -56,10 +58,10 @@ object CloudStateRunner {
 
 /**
  * The CloudStateRunner is responsible for handle the bootstrap of entities,
- * and is used by [[io.cloudstate.javasupport.CloudState.start()]] to set up the local
+ * and is used by [[io.cloudstate.javasupport.CloudState#start()]] to set up the local
  * server with the given configuration.
  *
- * CloudStateRunner can be seen as a low-level API for cases where [[io.cloudstate.javasupport.CloudState.start()]] isn't enough.
+ * CloudStateRunner can be seen as a low-level API for cases where [[io.cloudstate.javasupport.CloudState#start()]] isn't enough.
  */
 final class CloudStateRunner private[this] (_system: ActorSystem, services: Map[String, StatefulService]) {
   private[this] implicit final val system = _system
@@ -99,6 +101,11 @@ final class CloudStateRunner private[this] (_system: ActorSystem, services: Map[
             if serviceClass == classOf[CrdtStatefulService] =>
           val crdtImpl = new CrdtImpl(system, crdtServices, rootContext)
           route orElse CrdtHandler.partial(crdtImpl)
+
+        case (route, (serviceClass, crudServices: Map[String, CrudStatefulService] @unchecked))
+            if serviceClass == classOf[CrudStatefulService] =>
+          val crudImpl = new CrudImpl(system, crudServices, rootContext, configuration)
+          route orElse CrudHandler.partial(crudImpl)
 
         case (_, (serviceClass, _)) =>
           sys.error(s"Unknown StatefulService: $serviceClass")

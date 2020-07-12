@@ -82,12 +82,16 @@ private[impl] class AnnotationBasedCrudSupport(
       }
     }
 
-    override def handleState(anyState: JavaPbAny, context: StateContext): Unit = unwrap {
-      val state = anySupport.decode(anyState).asInstanceOf[AnyRef]
+    override def handleState(anyState: Optional[JavaPbAny], context: StateContext): Unit = unwrap {
+      import scala.compat.java8.OptionConverters._
+      val state = anyState.asScala.map(s => anySupport.decode(s)).asJava.asInstanceOf[AnyRef]
 
-      behavior.getCachedSnapshotHandlerForClass(state.getClass) match {
+      behavior.getCachedStateHandlerForClass(state.getClass) match {
         case Some(handler) =>
-          handler.invoke(entity, state, new DelegatingCrudContext(context) with StateContext)
+          val ctx = new DelegatingCrudContext(context) with StateContext {
+            override def sequenceNumber(): Long = context.sequenceNumber()
+          }
+          handler.invoke(entity, state, ctx)
         case None =>
           throw new RuntimeException(
             s"No state handler found for state ${state.getClass} on $behaviorsString"
@@ -114,17 +118,17 @@ private[impl] class AnnotationBasedCrudSupport(
 
 private class EventBehaviorReflection(
     val commandHandlers: Map[String, ReflectionHelper.CommandHandlerInvoker[CommandContext]],
-    snapshotHandlers: Map[Class[_], SnapshotHandlerInvoker]
+    val stateHandlers: Map[Class[_], StateHandlerInvoker]
 ) {
 
   /**
    * We use a cache in addition to the info we've discovered by reflection so that an event handler can be declared
    * for a superclass of an event.
    */
-  private val snapshotHandlerCache = TrieMap.empty[Class[_], Option[SnapshotHandlerInvoker]]
+  private val stateHandlerCache = TrieMap.empty[Class[_], Option[StateHandlerInvoker]]
 
-  def getCachedSnapshotHandlerForClass(clazz: Class[_]): Option[SnapshotHandlerInvoker] =
-    snapshotHandlerCache.getOrElseUpdate(clazz, getHandlerForClass(snapshotHandlers)(clazz))
+  def getCachedStateHandlerForClass(clazz: Class[_]): Option[StateHandlerInvoker] =
+    stateHandlerCache.getOrElseUpdate(clazz, getHandlerForClass(stateHandlers)(clazz))
 
   private def getHandlerForClass[T](handlers: Map[Class[_], T])(clazz: Class[_]): Option[T] =
     handlers.get(clazz) match {
@@ -172,7 +176,7 @@ private object EventBehaviorReflection {
     val snapshotHandlers = allMethods
       .filter(_.getAnnotation(classOf[StateHandler]) != null)
       .map { method =>
-        new SnapshotHandlerInvoker(ReflectionHelper.ensureAccessible(method))
+        new StateHandlerInvoker(ReflectionHelper.ensureAccessible(method))
       }
       .groupBy(_.snapshotClass)
       .map {
@@ -182,7 +186,7 @@ private object EventBehaviorReflection {
             s"Multiple methods found for handling snapshot of type $clazz: ${many.map(_.method.getName)}"
           )
       }
-      .asInstanceOf[Map[Class[_], SnapshotHandlerInvoker]]
+      .asInstanceOf[Map[Class[_], StateHandlerInvoker]]
 
     ReflectionHelper.validateNoBadMethods(
       allMethods,
@@ -208,17 +212,23 @@ private class EntityConstructorInvoker(constructor: Constructor[_]) extends (Cru
   }
 }
 
-private class SnapshotHandlerInvoker(val method: Method) {
+private class StateHandlerInvoker(val method: Method) {
   private val parameters = ReflectionHelper.getParameterHandlers[StateContext](method)()
 
-  // Verify that there is at most one event handler
+  // Verify that there is at most one state handler
   val snapshotClass: Class[_] = parameters.collect {
+    /*
+    case MainArgumentParameterHandler(clazz) if !classOf[Optional[_]].isAssignableFrom(clazz) =>
+      throw new RuntimeException(
+        s"Incompatible state class $clazz for StateHandler ${method.getName}"
+      )
+     */
     case MainArgumentParameterHandler(clazz) => clazz
   } match {
     case Array(handlerClass) => handlerClass
     case other =>
       throw new RuntimeException(
-        s"SnapshotHandler method $method must defined at most one non context parameter to handle snapshots, the parameters defined were: ${other
+        s"StateHandler method $method must defined at most one non context parameter to handle state, the parameters defined were: ${other
           .mkString(",")}"
       )
   }

@@ -26,11 +26,22 @@ import "cloudstate/entity.proto";
 option java_package = "io.cloudstate.protocol";
 option go_package = "cloudstate/protocol";
 
+// The CRUD Entity service
 service Crud {
-  // A streamed connection for handling commands to a particular entity.
+
+  // One stream will be established per active entity.
+  // Once established, the first message sent will be Init, which contains the entity ID, and,
+  // a state if the entity has previously persisted one. The entity is expected to apply the
+  // received state to its state. Once the Init message is sent, one to many commands are sent,
+  // with new commands being sent as new requests for the entity come in. The entity is expected
+  // to reply to each command with exactly one reply message. The entity should reply in order
+  // and any state update that the entity requests to be persisted the entity should handle itself.
+  // The entity handles state update by replacing its own state with the update,
+  // as if they had arrived as state update when the stream was being replayed on load.
   rpc handle(stream CrudStreamIn) returns (stream CrudStreamOut) {}
 }
 
+// Input message type for the gRPC stream in.
 message CrudStreamIn {
   oneof message {
     CrudInit init = 1;
@@ -38,39 +49,28 @@ message CrudStreamIn {
   }
 }
 
-// When an CRUD entity is first activated, it will receive this message first
-// before any commands are sent, this will tell it the service it's for and
-// the id of the entity it's for, and if the value for the entity already
-// exists, it will contain that as well.
+// The init message. This will always be the first message sent to the entity when it is loaded.
 message CrudInit {
-  // The name of the service that implements this CRUD entity
+  // The name of the service that implements this entity.
   string service_name = 1;
-  // The id of the entity
+
+  // The id of the entity.
   string entity_id = 2;
-  // The value of the entity, if the entity has already been created.
+
+  // The initial state of the entity.
+  CrudInitState state = 3;
+}
+
+// The state of the entity when it is first activated.
+message CrudInitState {
+  // The value of the entity state, if the entity has already been created.
   google.protobuf.Any value = 3;
-  // Indicate the state of the CRUD entity which is sent to the user function to replace its current state.
-  CrudState state = 4;
+
+  // The sequence number of the entity state.
+  int64 sequence = 4;
 }
 
-// Represents the full state of an CRUD entity. It is sent to the user function so that it replaces
-// the current state.
-message CrudState {
-  oneof state {
-    CrudUpdateState updated = 1;
-    CrudDeleteState deleted = 2;
-  }
-}
-
-// Represents the state of an created and updated CRUD entity
-message CrudUpdateState {
-  // The value to set.
-  google.protobuf.Any value = 1;
-}
-
-// Represents the state of an deleted CRUD entity
-message CrudDeleteState {}
-
+// Output message type for the gRPC stream out.
 message CrudStreamOut {
   oneof message {
     CrudReply reply = 1;
@@ -78,17 +78,33 @@ message CrudStreamOut {
   }
 }
 
+// A reply to a command.
 message CrudReply {
   // The command being replied to
   int64 command_id = 1;
+
   // The action to take for the client response
   ClientAction client_action = 2;
+
   // Any side effects to perform
   repeated SideEffect side_effects = 3;
+
   // The action to take on the CRUD entity
   CrudAction crud_action = 4;
+
+  // An optional snapshot to persist.
+  // It is assumed that this snapshot will have the state of any actions in the crud action field applied to it.
+  // It is illegal to send a snapshot without sending any crud action.
+  CrudSnapshot snapshot = 5;
 }
 
+// A snapshot of the entity.
+message CrudSnapshot {
+  // The value of the snapshot, if a snapshot has already been created.
+  google.protobuf.Any value = 3;
+}
+
+// An action to take for changing the entity state.
 message CrudAction {
   oneof action {
     CrudUpdate update = 1;
@@ -96,11 +112,11 @@ message CrudAction {
   }
 }
 
-// Update the persisted value of the CRUD entity. If the entity is not yet persisted, it will be created.
+// An action which updates the persisted value of the CRUD entity. If the entity is not yet persisted, it will be created.
 message CrudUpdate {
   // The value to set.
   google.protobuf.Any value = 1;
 }
 
-// Delete the persisted value of the CRUD entity
+// An action which deletes the persisted value of the CRUD entity.
 message CrudDelete {}
