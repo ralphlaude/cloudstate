@@ -51,7 +51,7 @@ private[impl] class AnnotationBasedCrudSupport(
   def this(entityClass: Class[_], anySupport: AnySupport, serviceDescriptor: Descriptors.ServiceDescriptor) =
     this(entityClass, anySupport, anySupport.resolveServiceDescriptor(serviceDescriptor))
 
-  private val behavior = EventBehaviorReflection(entityClass, resolvedMethods)
+  private val behavior = CrudBehaviorReflection(entityClass, resolvedMethods)
 
   private val constructor: CrudEntityCreationContext => AnyRef = factory.getOrElse {
     entityClass.getConstructors match {
@@ -116,15 +116,11 @@ private[impl] class AnnotationBasedCrudSupport(
   }
 }
 
-private class EventBehaviorReflection(
+private class CrudBehaviorReflection(
     val commandHandlers: Map[String, ReflectionHelper.CommandHandlerInvoker[CommandContext]],
     val stateHandlers: Map[Class[_], StateHandlerInvoker]
 ) {
 
-  /**
-   * We use a cache in addition to the info we've discovered by reflection so that an event handler can be declared
-   * for a superclass of an event.
-   */
   private val stateHandlerCache = TrieMap.empty[Class[_], Option[StateHandlerInvoker]]
 
   def getCachedStateHandlerForClass(clazz: Class[_]): Option[StateHandlerInvoker] =
@@ -142,9 +138,9 @@ private class EventBehaviorReflection(
     }
 }
 
-private object EventBehaviorReflection {
+private object CrudBehaviorReflection {
   def apply(behaviorClass: Class[_],
-            serviceMethods: Map[String, ResolvedServiceMethod[_, _]]): EventBehaviorReflection = {
+            serviceMethods: Map[String, ResolvedServiceMethod[_, _]]): CrudBehaviorReflection = {
 
     val allMethods = ReflectionHelper.getAllDeclaredMethods(behaviorClass)
     val commandHandlers = allMethods
@@ -173,7 +169,7 @@ private object EventBehaviorReflection {
           )
       }
 
-    val snapshotHandlers = allMethods
+    val stateHandlers = allMethods
       .filter(_.getAnnotation(classOf[StateHandler]) != null)
       .map { method =>
         new StateHandlerInvoker(ReflectionHelper.ensureAccessible(method))
@@ -194,7 +190,7 @@ private object EventBehaviorReflection {
       Set(classOf[CommandHandler], classOf[StateHandler])
     )
 
-    new EventBehaviorReflection(commandHandlers, snapshotHandlers)
+    new CrudBehaviorReflection(commandHandlers, stateHandlers)
   }
 }
 
@@ -217,12 +213,6 @@ private class StateHandlerInvoker(val method: Method) {
 
   // Verify that there is at most one state handler
   val snapshotClass: Class[_] = parameters.collect {
-    /*
-    case MainArgumentParameterHandler(clazz) if !classOf[Optional[_]].isAssignableFrom(clazz) =>
-      throw new RuntimeException(
-        s"Incompatible state class $clazz for StateHandler ${method.getName}"
-      )
-     */
     case MainArgumentParameterHandler(clazz) => clazz
   } match {
     case Array(handlerClass) => handlerClass

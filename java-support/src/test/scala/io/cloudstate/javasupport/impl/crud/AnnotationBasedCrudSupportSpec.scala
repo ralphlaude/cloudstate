@@ -272,7 +272,7 @@ class AnnotationBasedCrudSupportSpec extends WordSpec with Matchers {
         })
       }
 
-      "fail if there's no snapshot handler for the given type" in {
+      "fail if there's no state handler for the given type" in {
         val handler = create(new {
           @StateHandler
           def handleState(state: Int) = ()
