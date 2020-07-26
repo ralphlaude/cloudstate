@@ -89,7 +89,7 @@ final class CrudEntitySupervisor(client: CrudClient,
             NotUsed
           }
       )
-      .runWith(Sink.actorRef(self, CrudEntity.StreamClosed))
+      .runWith(Sink.actorRef(self, CrudEntity.StreamClosed, CrudEntity.StreamFailed.apply))
     context.become(waitingForRelay)
   }
 
