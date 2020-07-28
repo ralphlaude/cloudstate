@@ -23,17 +23,21 @@ import io.cloudstate.javasupport.EntityId;
 import io.cloudstate.javasupport.crud.CommandContext;
 import io.cloudstate.javasupport.crud.CommandHandler;
 import io.cloudstate.javasupport.crud.CrudEntity;
-import io.cloudstate.javasupport.crud.StateHandler;
+import io.cloudstate.javasupport.crud.DeleteStateHandler;
+import io.cloudstate.javasupport.crud.UpdateStateHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** A CRUD entity. */
 @CrudEntity
 public class ShoppingCartCrudEntity {
+
+  private final Logger logger = LoggerFactory.getLogger(ShoppingCartCrudEntity.class);
 
   private final String entityId;
   private final Map<String, Shoppingcart.LineItem> cart = new LinkedHashMap<>();
@@ -42,19 +46,29 @@ public class ShoppingCartCrudEntity {
     this.entityId = entityId;
   }
 
-  @StateHandler
-  public void handleState(Optional<Domain.Cart> cart) {
+  @UpdateStateHandler
+  public void handleUpdateState(Domain.Cart cart) {
+    logger.info(
+        "ShoppingCartCrudEntity handleUpdateState called with cart.values() - "
+            + this.cart.values().size());
     this.cart.clear();
-    cart.ifPresent(
-        c -> {
-          for (Domain.LineItem item : c.getItemsList()) {
-            this.cart.put(item.getProductId(), convert(item));
-          }
-        });
+    for (Domain.LineItem item : cart.getItemsList()) {
+      this.cart.put(item.getProductId(), convert(item));
+    }
+  }
+
+  @DeleteStateHandler
+  public void handleDeleteState() {
+    logger.info(
+        "ShoppingCartCrudEntity handleDeleteState called with cart.values() - "
+            + cart.values().size());
+    this.cart.clear();
   }
 
   @CommandHandler
   public Shoppingcart.Cart getCart() {
+    logger.info(
+        "ShoppingCartCrudEntity getCart called with cart.values() - " + cart.values().size());
     return Shoppingcart.Cart.newBuilder().addAllItems(cart.values()).build();
   }
 
@@ -63,6 +77,7 @@ public class ShoppingCartCrudEntity {
     if (!entityId.equals(cartItem.getUserId())) {
       ctx.fail("Cannot remove unknown cart " + cartItem.getUserId());
     }
+    logger.info("ShoppingCartCrudEntity removeCart called with item - " + cart);
     cart.clear();
 
     ctx.delete();
@@ -87,6 +102,7 @@ public class ShoppingCartCrudEntity {
       lineItem =
           lineItem.toBuilder().setQuantity(lineItem.getQuantity() + item.getQuantity()).build();
     }
+    logger.info("ShoppingCartCrudEntity addItem called with item - " + item);
     cart.put(item.getProductId(), lineItem);
 
     List<Domain.LineItem> lineItems =
@@ -100,6 +116,7 @@ public class ShoppingCartCrudEntity {
     if (!cart.containsKey(item.getProductId())) {
       ctx.fail("Cannot remove item " + item.getProductId() + " because it is not in the cart.");
     }
+    logger.info("ShoppingCartCrudEntity removeItem called with item - " + item);
     cart.remove(item.getProductId());
 
     List<Domain.LineItem> lineItems =
