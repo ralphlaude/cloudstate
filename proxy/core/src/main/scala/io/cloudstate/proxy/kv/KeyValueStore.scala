@@ -17,9 +17,9 @@
 package io.cloudstate.proxy.kv
 
 import akka.util.ByteString
-import com.google.protobuf.{ ByteString => PbByteString }
-import io.cloudstate.proxy.kv.KeyValueStore.Key
 import com.google.protobuf.any.{Any => ScalaPbAny}
+import com.google.protobuf.{ByteString => PbByteString}
+import io.cloudstate.proxy.kv.KeyValueStore.Key
 
 import scala.concurrent.Future
 
@@ -85,6 +85,7 @@ class InMemoryKeyValueStore extends KeyValueStore[Key, ByteString] {
 
 object InMemoryKeyValueStore {
 
+  // This is just a use case sample
   def main(args: Array[String]): Unit = {
     val inMemKV = new InMemoryKeyValueStore
     val state = ScalaPbAny("crud-state", PbByteString.copyFromUtf8("state"))
@@ -95,22 +96,4 @@ object InMemoryKeyValueStore {
     val deleteKey: Future[Unit] = inMemKV.delete(key)
   }
 
-}
-
-class JDBCKeyValueStore extends KeyValueStore[Key, ScalaPbAny] {
-
-  override def get(key: Key): Future[Option[ScalaPbAny]] = ???
-
-  override def set(key: Key, value: ScalaPbAny): Future[Unit] = ???
-
-  override def delete(key: Key): Future[Unit] = ???
-}
-
-class CassandraKeyValueStore extends KeyValueStore[Key, ScalaPbAny] {
-
-  override def get(key: Key): Future[Option[ScalaPbAny]] = ???
-
-  override def set(key: Key, value: ScalaPbAny): Future[Unit] = ???
-
-  override def delete(key: Key): Future[Unit] = ???
 }
