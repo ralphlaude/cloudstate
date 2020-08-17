@@ -14,11 +14,14 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kvstore
+package io.cloudstate.proxy.kv
 
 import akka.util.ByteString
-import io.cloudstate.proxy.kvstore.KeyValueStore.Key
+import com.google.protobuf.{ ByteString => PbByteString }
+import io.cloudstate.proxy.kv.KeyValueStore.Key
 import com.google.protobuf.any.{Any => ScalaPbAny}
+
+import scala.concurrent.Future
 
 /*
  * TODOs
@@ -53,43 +56,61 @@ object KeyValueStore {
 
 trait KeyValueStore[K, V] {
 
-  def get(key: K): V
+  def get(key: K): Future[Option[V]]
 
-  def set(key: K, value: V): Unit
+  def set(key: K, value: V): Future[Unit]
 
-  def delete(key: K): Unit
+  def delete(key: K): Future[Unit]
 
 }
 
-class InMemoryKeyValueStore extends KeyValueStore[Key, ScalaPbAny] {
+class InMemoryKeyValueStore extends KeyValueStore[Key, ByteString] {
 
   private[this] final var store = Map.empty[Key, ByteString]
 
-  override def get(key: Key): ScalaPbAny = {
-    val v = store(key)
-    ScalaPbAny.parseFrom(v.asByteBuffer.array())
+  override def get(key: Key): Future[Option[ByteString]] = {
+    Future.successful(store.get(key))
   }
 
-  override def set(key: Key, value: ScalaPbAny): Unit =
-    store += key -> ByteString(value.toByteArray)
+  override def set(key: Key, value: ByteString): Future[Unit] = {
+    store += key -> value
+    Future.unit
+  }
 
-  override def delete(key: Key): Unit = store -= key
+  override def delete(key: Key): Future[Unit] = {
+    store -= key
+    Future.unit
+  }
+}
+
+object InMemoryKeyValueStore {
+
+  def main(args: Array[String]): Unit = {
+    val inMemKV = new InMemoryKeyValueStore
+    val state = ScalaPbAny("crud-state", PbByteString.copyFromUtf8("state"))
+    val key = Key("persistentEntityId", "entityId")
+
+    val setKey: Future[Unit] = inMemKV.set(key, ByteString(state.toByteArray))
+    val maybeState: Future[Option[ByteString]] = inMemKV.get(key)
+    val deleteKey: Future[Unit] = inMemKV.delete(key)
+  }
+
 }
 
 class JDBCKeyValueStore extends KeyValueStore[Key, ScalaPbAny] {
 
-  override def get(key: Key): ScalaPbAny = ???
+  override def get(key: Key): Future[Option[ScalaPbAny]] = ???
 
-  override def set(key: Key, value: ScalaPbAny): Unit = ???
+  override def set(key: Key, value: ScalaPbAny): Future[Unit] = ???
 
-  override def delete(key: Key): Unit = ???
+  override def delete(key: Key): Future[Unit] = ???
 }
 
 class CassandraKeyValueStore extends KeyValueStore[Key, ScalaPbAny] {
 
-  override def get(key: Key): ScalaPbAny = ???
+  override def get(key: Key): Future[Option[ScalaPbAny]] = ???
 
-  override def set(key: Key, value: ScalaPbAny): Unit = ???
+  override def set(key: Key, value: ScalaPbAny): Future[Unit] = ???
 
-  override def delete(key: Key): Unit = ???
+  override def delete(key: Key): Future[Unit] = ???
 }
