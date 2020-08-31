@@ -19,14 +19,33 @@ package io.cloudstate.proxy.kv
 import akka.util.ByteString
 import com.google.protobuf.any.{Any => ScalaPbAny}
 import com.google.protobuf.{ByteString => PbByteString}
+import com.typesafe.config.{Config, ConfigFactory}
 import io.cloudstate.proxy.kv.KeyValueStore.Key
+import slick.basic.DatabaseConfig
+import slick.jdbc.JdbcBackend.Database
+import slick.jdbc.{JdbcBackend, JdbcProfile}
 
-import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.DurationInt
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 /*
+ *
  * TODOs
- * This is the API interface i came up with.
- * Here the only concern is about the write side and the read side will come later.
+ * 1- define an interface for a Key-Value store
+ * 2- implement the Key-Value store interface for In-Memory
+ * 3- implement the Key-Value store interface for Postgres
+ * 4- implement the Key-Value store interface for MySQL
+ * 5- implement the Key-Value store interface for a native Key-Value database like Cassandra
+ *
+ * TODOs implementation
+ * 1- load the right Key-Value store implementation depending on the configuration
+ * 2- implement a repository which wrap the right Key-Value store implementation
+ * 3- define the schema for application.conf for the JDBC Key-Value store
+ * 4- define the schema for application.conf for the Cassandra Key-Value store
+ *
+ * The Key-Value store implementation for In-Memory is here InMemoryKeyValueStore.
+ * The class JdbcKeyValueStoreUseCase shows how to use the JdcRepository and the JdbcKeyValueStore.
  *
  * The configuration of a specific kv-store will look like this in the application.conf:
  *
@@ -50,7 +69,7 @@ import scala.concurrent.Future
 
 object KeyValueStore {
 
-  case class Key(persistentId: String, entityId: String)
+  case class Key(persistentEntityId: String, entityId: String)
 
 }
 
@@ -61,39 +80,5 @@ trait KeyValueStore[K, V] {
   def set(key: K, value: V): Future[Unit]
 
   def delete(key: K): Future[Unit]
-
-}
-
-class InMemoryKeyValueStore extends KeyValueStore[Key, ByteString] {
-
-  private[this] final var store = Map.empty[Key, ByteString]
-
-  override def get(key: Key): Future[Option[ByteString]] = {
-    Future.successful(store.get(key))
-  }
-
-  override def set(key: Key, value: ByteString): Future[Unit] = {
-    store += key -> value
-    Future.unit
-  }
-
-  override def delete(key: Key): Future[Unit] = {
-    store -= key
-    Future.unit
-  }
-}
-
-object InMemoryKeyValueStore {
-
-  // This is just a use case sample
-  def main(args: Array[String]): Unit = {
-    val inMemKV = new InMemoryKeyValueStore
-    val state = ScalaPbAny("crud-state", PbByteString.copyFromUtf8("state"))
-    val key = Key("persistentEntityId", "entityId")
-
-    val setKey: Future[Unit] = inMemKV.set(key, ByteString(state.toByteArray))
-    val maybeState: Future[Option[ByteString]] = inMemKV.get(key)
-    val deleteKey: Future[Unit] = inMemKV.delete(key)
-  }
 
 }

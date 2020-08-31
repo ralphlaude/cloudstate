@@ -446,9 +446,11 @@ lazy val `proxy-core` = (project in file("proxy/core"))
         "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
         "io.prometheus" % "simpleclient" % PrometheusClientVersion,
         "io.prometheus" % "simpleclient_common" % PrometheusClientVersion,
-        "org.slf4j" % "slf4j-simple" % "1.7.26"
+        "org.slf4j" % "slf4j-simple" % "1.7.26",
         //"ch.qos.logback"                 % "logback-classic"                   % "1.2.3", // Doesn't work well with SubstrateVM: https://github.com/vmencik/akka-graal-native/blob/master/README.md#logging
-      ),
+        "com.github.dnvriend" %% "akka-persistence-jdbc" % "3.5.2", //to be removed!!!
+        "org.postgresql" % "postgresql" % "42.2.6" //to be removed!!!
+    ),
     // Work around for https://github.com/akka/akka-grpc/pull/673
     (PB.targets in Compile) := {
       val old = (PB.targets in Compile).value
