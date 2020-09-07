@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kv
+package io.cloudstate.proxy.crud.store
 
 import akka.util.ByteString
-import io.cloudstate.proxy.kv.JdbcCrudStateTable.CrudStateRow
-import io.cloudstate.proxy.kv.KeyValueStore.Key
+import io.cloudstate.proxy.crud.store.JdbcCrudStateTable.CrudStateRow
+import io.cloudstate.proxy.crud.store.JdbcStore.Key
 
 import scala.concurrent.{ExecutionContext, Future}
 
-final class JdbcKeyValueStore(slickDatabase: JDBCSlickDatabase, queries: JdbcCrudStateQueries)(
+final class JdbcStoreImpl(slickDatabase: JdbcSlickDatabase, queries: JdbcCrudStateQueries)(
     implicit ec: ExecutionContext
-) extends KeyValueStore[Key, ByteString] {
+) extends JdbcStore[Key, ByteString] {
 
   import slickDatabase.profile.api._
 
@@ -33,7 +33,7 @@ final class JdbcKeyValueStore(slickDatabase: JDBCSlickDatabase, queries: JdbcCru
   override def get(key: Key): Future[Option[ByteString]] =
     db.run(queries.selectByKey(key).result.headOption.map(mayBeState => mayBeState.map(s => ByteString(s.state))))
 
-  override def set(key: Key, value: ByteString): Future[Unit] =
+  override def update(key: Key, value: ByteString): Future[Unit] =
     db.run(queries.insertOrUpdate(CrudStateRow(key, value.utf8String))).map(_ => ())
 
   override def delete(key: Key): Future[Unit] =

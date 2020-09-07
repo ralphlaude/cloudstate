@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kv
+package io.cloudstate.proxy.crud.store
 
-import io.cloudstate.proxy.kv.JdbcCrudStateTable.CrudStateRow
-import io.cloudstate.proxy.kv.KeyValueStore.Key
+import io.cloudstate.proxy.crud.store.JdbcCrudStateTable.CrudStateRow
+import io.cloudstate.proxy.crud.store.JdbcStore.Key
 import slick.jdbc.JdbcProfile
 
-class JdbcCrudStateQueries(val profile: JdbcProfile, override val crudStateTableCfg: CrudStateTableConfiguration)
+class JdbcCrudStateQueries(val profile: JdbcProfile, override val crudStateTableCfg: JdbcCrudStateTableConfiguration)
     extends JdbcCrudStateTable {
 
   import profile.api._
 
   def selectByKey(key: Key): Query[CrudStateTable, CrudStateRow, Seq] =
     CrudStateTableQuery
-      .filter(_.persistentEntityId === key.persistentEntityId)
+      .filter(_.persistentId === key.persistentEntityId)
       .filter(_.entityId === key.entityId)
       .take(1)
 
@@ -35,7 +35,7 @@ class JdbcCrudStateQueries(val profile: JdbcProfile, override val crudStateTable
 
   def deleteByKey(key: Key) =
     CrudStateTableQuery
-      .filter(_.persistentEntityId === key.persistentEntityId)
+      .filter(_.persistentId === key.persistentEntityId)
       .filter(_.entityId === key.entityId)
       .delete
 }

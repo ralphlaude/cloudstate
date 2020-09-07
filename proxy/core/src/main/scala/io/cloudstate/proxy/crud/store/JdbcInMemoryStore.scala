@@ -14,26 +14,33 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kv
+package io.cloudstate.proxy.crud.store
 
 import akka.util.ByteString
-import io.cloudstate.proxy.kv.KeyValueStore.Key
+import io.cloudstate.proxy.crud.store.JdbcStore.Key
+import org.slf4j.{Logger, LoggerFactory}
 
 import scala.concurrent.Future
 
-final class InMemoryKeyValueStore extends KeyValueStore[Key, ByteString] {
+final class JdbcInMemoryStore extends JdbcStore[Key, ByteString] {
+
+  private final val logger: Logger = LoggerFactory.getLogger(classOf[JdbcInMemoryStore])
 
   private final var store = Map.empty[Key, ByteString]
 
-  override def get(key: Key): Future[Option[ByteString]] =
+  override def get(key: Key): Future[Option[ByteString]] = {
+    logger.info(s"get called with key - $key")
     Future.successful(store.get(key))
+  }
 
-  override def set(key: Key, value: ByteString): Future[Unit] = {
+  override def update(key: Key, value: ByteString): Future[Unit] = {
+    logger.info(s"update called with key - $key and value - $value")
     store += key -> value
     Future.unit
   }
 
   override def delete(key: Key): Future[Unit] = {
+    logger.info(s"delete called with key - $key")
     store -= key
     Future.unit
   }

@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kv
+package io.cloudstate.proxy.crud.store
 
-import io.cloudstate.proxy.kv.JdbcCrudStateTable.CrudStateRow
-import io.cloudstate.proxy.kv.KeyValueStore.Key
+import io.cloudstate.proxy.crud.store.JdbcCrudStateTable.CrudStateRow
+import io.cloudstate.proxy.crud.store.JdbcStore.Key
 import slick.lifted.{MappedProjection, ProvenShape}
 
 object JdbcCrudStateTable {
@@ -31,7 +31,7 @@ trait JdbcCrudStateTable {
 
   import profile.api._
 
-  def crudStateTableCfg: CrudStateTableConfiguration
+  def crudStateTableCfg: JdbcCrudStateTableConfiguration
 
   class CrudStateTable(tableTag: Tag)
       extends Table[CrudStateRow](_tableTag = tableTag,
@@ -39,13 +39,13 @@ trait JdbcCrudStateTable {
                                   _tableName = crudStateTableCfg.tableName) {
     def * : ProvenShape[CrudStateRow] = (key, state) <> (CrudStateRow.tupled, CrudStateRow.unapply)
 
-    val persistentEntityId: Rep[String] =
-      column[String](crudStateTableCfg.columnNames.persistentEntityId, O.Length(255, varying = true))
+    val persistentId: Rep[String] =
+      column[String](crudStateTableCfg.columnNames.persistentId, O.Length(255, varying = true))
     val entityId: Rep[String] = column[String](crudStateTableCfg.columnNames.entityId, O.Length(255, varying = true))
     //TODO change state from Rep[String] to Rep[Array[Byte]]
     val state: Rep[String] = column[String](crudStateTableCfg.columnNames.state, O.Length(255, varying = true))
-    val key: MappedProjection[Key, (String, String)] = (persistentEntityId, entityId) <> (Key.tupled, Key.unapply)
-    val pk = primaryKey(s"${tableName}_pk", (persistentEntityId, entityId))
+    val key: MappedProjection[Key, (String, String)] = (persistentId, entityId) <> (Key.tupled, Key.unapply)
+    val pk = primaryKey(s"${tableName}_pk", (persistentId, entityId))
   }
 
   lazy val CrudStateTableQuery = new TableQuery(tag => new CrudStateTable(tag))

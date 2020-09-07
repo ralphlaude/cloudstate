@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kv
+package io.cloudstate.proxy.crud.store
 
 import akka.util.ByteString
 import com.google.protobuf.any.{Any => ScalaPbAny}
-import io.cloudstate.proxy.kv.KeyValueStore.Key
+import io.cloudstate.proxy.crud.store.JdbcStore.Key
 
 import scala.concurrent.Future
 
 trait Repository {
 
-  val kvStore: KeyValueStore[Key, ByteString]
+  val store: JdbcStore[Key, ByteString]
 
   /**
    * Retrieve the data for the given key.
@@ -38,7 +38,7 @@ trait Repository {
    * Insert the data with the given key if it not already exists.
    * Update the data at the given key if it already exists.
    *
-   * @param key to insert or update the entity
+   * @param key  to insert or update the entity
    * @param data that should be persisted
    */
   def update(key: Key, data: ScalaPbAny): Future[Unit]

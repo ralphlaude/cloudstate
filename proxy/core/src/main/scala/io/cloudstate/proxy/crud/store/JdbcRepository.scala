@@ -14,18 +14,18 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kv
+package io.cloudstate.proxy.crud.store
 
 import akka.util.ByteString
 import com.google.protobuf.any.{Any => ScalaPbAny}
-import io.cloudstate.proxy.kv.KeyValueStore.Key
+import io.cloudstate.proxy.crud.store.JdbcStore.Key
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class JdbcRepository(val kvStore: KeyValueStore[Key, ByteString])(implicit ec: ExecutionContext) extends Repository {
+class JdbcRepository(val store: JdbcStore[Key, ByteString])(implicit ec: ExecutionContext) extends Repository {
 
   def get(key: Key): Future[Option[ScalaPbAny]] =
-    kvStore
+    store
       .get(key)
       .map {
         case Some(value) => Some(ScalaPbAny.parseFrom(value.toByteBuffer.array()))
@@ -33,7 +33,7 @@ class JdbcRepository(val kvStore: KeyValueStore[Key, ByteString])(implicit ec: E
       }
 
   def update(key: Key, entity: ScalaPbAny): Future[Unit] =
-    kvStore.set(key, ByteString(entity.toByteArray))
+    store.update(key, ByteString(entity.toByteArray))
 
-  def delete(key: Key): Future[Unit] = kvStore.delete(key)
+  def delete(key: Key): Future[Unit] = store.delete(key)
 }

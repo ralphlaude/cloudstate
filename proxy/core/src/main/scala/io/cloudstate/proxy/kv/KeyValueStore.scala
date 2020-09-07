@@ -16,18 +16,7 @@
 
 package io.cloudstate.proxy.kv
 
-import akka.util.ByteString
-import com.google.protobuf.any.{Any => ScalaPbAny}
-import com.google.protobuf.{ByteString => PbByteString}
-import com.typesafe.config.{Config, ConfigFactory}
-import io.cloudstate.proxy.kv.KeyValueStore.Key
-import slick.basic.DatabaseConfig
-import slick.jdbc.JdbcBackend.Database
-import slick.jdbc.{JdbcBackend, JdbcProfile}
-
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.Future
 
 /*
  *
@@ -48,22 +37,6 @@ import scala.concurrent.{Await, ExecutionContext, Future}
  * The class JdbcKeyValueStoreUseCase shows how to use the JdcRepository and the JdbcKeyValueStore.
  *
  * The configuration of a specific kv-store will look like this in the application.conf:
- *
- * crud {
- *  enabled = true
- *  store = "inmen" // could have jdbc, postgres or cassandra
- *  database = {
- *    database-name: "crud-persistentid"
- *    table {
- *      table-name = "crud-persistentid"
- *      columns-name: {
- *        persistentId = "persistentId"
- *        entityId = "entityId"
- *        state = "state"
- *      }
- *    }
- *  }
- * }
  *
  */
 

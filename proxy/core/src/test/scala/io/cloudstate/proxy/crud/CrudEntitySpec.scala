@@ -168,7 +168,8 @@ class CrudEntitySpec extends AbstractCrudEntitySpec {
           entityId,
           userFunction.ref,
           concurrencyEnforcer,
-          statsCollector.ref
+          statsCollector.ref,
+          null
         )
       )
       watch(reactivatedEntity)

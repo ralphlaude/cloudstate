@@ -173,7 +173,8 @@ abstract class AbstractCrudEntitySpec
         entityId,
         userFunction.ref,
         concurrencyEnforcer,
-        statsCollector.ref
+        statsCollector.ref,
+        null
       )
     )
 
@@ -197,7 +198,8 @@ abstract class AbstractCrudEntitySpec
         entityId,
         userFunction.ref,
         concurrencyEnforcer,
-        statsCollector.ref
+        statsCollector.ref,
+        null
       )
     )
   }

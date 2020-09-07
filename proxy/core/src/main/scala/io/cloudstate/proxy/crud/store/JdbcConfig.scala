@@ -14,50 +14,51 @@
  * limitations under the License.
  */
 
-package io.cloudstate.proxy.kv
+package io.cloudstate.proxy.crud.store
 
 import com.typesafe.config.Config
 import slick.basic.DatabaseConfig
-import slick.jdbc.{JdbcBackend, JdbcProfile}
 import slick.jdbc.JdbcBackend.Database
+import slick.jdbc.{JdbcBackend, JdbcProfile}
 
-class CrudStateTableColumnNames(config: Config) {
-  private val cfg = config.getConfig("tables.state-store.columnNames")
+class JdbcCrudStateTableColumnNames(config: Config) {
+  private val cfg = config.getConfig("tables.state.columnNames")
 
-  val persistentEntityId: String = cfg.getString("persistentEntityId")
+  val persistentId: String = cfg.getString("persistentId")
   val entityId: String = cfg.getString("entityId")
   val state: String = cfg.getString("state")
 
-  override def toString: String = s"CrudStateTableColumnNames($persistentEntityId,$entityId,$state)"
+  override def toString: String = s"JdbcCrudStateTableColumnNames($persistentId,$entityId,$state)"
 }
 
-class CrudStateTableConfiguration(config: Config) {
-  private val cfg = config.getConfig("tables.state-store")
+class JdbcCrudStateTableConfiguration(config: Config) {
+  private val cfg = config.getConfig("tables.state")
 
   val tableName: String = cfg.getString("tableName")
+  //TODO: handle the empty schemaName!!!
   val schemaName: Option[String] = Option(cfg.getString("schemaName")).map(_.trim)
-  val columnNames: CrudStateTableColumnNames = new CrudStateTableColumnNames(config)
+  val columnNames: JdbcCrudStateTableColumnNames = new JdbcCrudStateTableColumnNames(config)
 
-  override def toString: String = s"CrudStateTableConfiguration($tableName,$schemaName,$columnNames)"
+  override def toString: String = s"JdbcCrudStateTableConfiguration($tableName,$schemaName,$columnNames)"
 }
 
-object JDBCSlickDatabase {
+object JdbcSlickDatabase {
 
-  def apply(config: Config): JDBCSlickDatabase = {
+  def apply(config: Config): JdbcSlickDatabase = {
     val database: JdbcBackend.Database = Database.forConfig(
-      "crud-database",
+      "crud.jdbc.database.slick",
       config
     )
     val profile: JdbcProfile = DatabaseConfig
       .forConfig[JdbcProfile](
-        "crud-database",
+        "crud.jdbc.database.slick",
         config
       )
       .profile
 
-    JDBCSlickDatabase(database, profile)
+    JdbcSlickDatabase(database, profile)
   }
 
 }
 
-case class JDBCSlickDatabase(database: JdbcBackend.Database, profile: JdbcProfile)
+case class JdbcSlickDatabase(database: JdbcBackend.Database, profile: JdbcProfile)
